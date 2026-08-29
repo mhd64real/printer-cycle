@@ -72,7 +72,11 @@ output has to be a folder of files a Go binary serves.
 - A short section stating that implementing this protocol creates no licensing obligation, so
   connector authors can licence their own repos however they like.
 - **Done when:** the licensing sentence exists in the spec.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** placed immediately after the opening, before section 0, since that is the first thing a
+  connector author reads. Went further than planned and also declared the protocol itself free for
+  anyone to implement on either side, including in a competing implementation of core. That invites
+  alternative cores, which is what separates a protocol from an API.
 
 ### Stage 5: Repo layout, compiling stubs, and Makefile
 - `cmd/core`, `cmd/dashboard`, `internal/`, `web/`, `scripts/`.
@@ -539,3 +543,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-30, after Stage 3:** no structural change. The README carries the connector licensing
   note in addition to Stage 4's copy in the spec, because that is the first place a connector author
   looks.
+- **2026-08-30, after Stage 4:** no structural change. The licensing section also grants the right to
+  implement the protocol in a competing core, which was not in the original scope of the stage but
+  costs nothing and makes the spec a real protocol rather than a house API.

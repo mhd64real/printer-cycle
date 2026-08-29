@@ -60,6 +60,18 @@ on whatever you already have.
   will never run on an ARM board. They do work if you run printer-cycle on an old x86 machine
   instead. A compatibility list will exist before the first release.
 
+## Development
+
+Go and Docker, nothing else. No printer and no Raspberry Pi required: the development environment
+provides a containerised CUPS with the full driver catalogue, virtual queues, and a discoverable
+virtual network printer.
+
+```sh
+make dev-up && make dev-printers && make build
+```
+
+See [docs/development.md](docs/development.md).
+
 ## Licence
 
 GPLv3. See [LICENSE](LICENSE).

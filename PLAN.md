@@ -167,7 +167,13 @@ actually ships CUPS 3.x.
 ### Stage 9: Document the dev loop
 - `docs/development.md`: start the container, create the queues, run core, what to expect.
 - **Done when:** the file is enough for someone else to get running without asking.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** verified by tearing the environment down and following the document verbatim, rather
+  than by rereading it. That caught one real gap: mDNS advertisement is not instant, so the discovery
+  check run immediately after `make dev-up` returns nothing and reads as broken. The document now
+  says so. Also covers the three things that would otherwise waste someone's afternoon: port 6631
+  instead of 631, no authentication in the container and why that is the faithful choice, and the
+  driver deprecation warning being expected output.
 
 ---
 
@@ -625,3 +631,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   discovery look testable while testing nothing. Also resolved the CUPS 3.0 driver risk down to a
   fact rather than a worry: the target platform ships CUPS 2.4.10 with drivers deprecated but
   working. Noted against Stage 58 that the deprecation warning is expected output, not a failure.
+- **2026-08-30, after Stage 9:** Phase 1 complete. No structural change. Following the new document
+  from a torn-down state surfaced a timing gap in the discovery check, now documented. The
+  development environment needs only Go and Docker: no printer, no Pi.

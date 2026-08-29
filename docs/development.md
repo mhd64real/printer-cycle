@@ -49,6 +49,8 @@ Output lands in `/var/spool/pc-out/` inside the CUPS container.
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:6631/
 
 # discovery finds the virtual printer
+# (give it a few seconds after dev-up: mDNS advertisement is not instant, and an
+#  empty result immediately after startup means "too early", not "broken")
 docker exec printer-cycle-cups lpinfo -v | grep dnssd
 
 # printing works end to end

@@ -9,6 +9,23 @@ the project.
 
 ---
 
+## Licensing of connectors
+
+printer-cycle core is GPLv3. **Implementing this protocol places no licensing obligation on your
+connector.**
+
+A connector is a separate program, in its own process, communicating with core over this documented
+protocol. It does not link against core and it is not a derivative work of it. License your
+connector however you like, including as closed source, and including as something you sell.
+
+This is the project's stated position as copyright holder, written down so nobody has to guess at
+it. It is not legal advice, and the text of the GPLv3 governs core's own code.
+
+The protocol in this document is free for anyone to implement, in any language, on either side of
+the connection, including in a competing implementation of core itself.
+
+---
+
 ## 0. The rules this protocol exists to enforce
 
 1. Core authenticates connectors. Connectors identify people. Core never trusts a connector's claim

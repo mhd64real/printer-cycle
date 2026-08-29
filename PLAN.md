@@ -50,7 +50,11 @@ output has to be a folder of files a Go binary serves.
 - `LICENSE` with the full GPLv3 text.
 - `go mod init github.com/mhd64real/printer-cycle`.
 - **Done when:** `go build ./...` runs clean on an empty module.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** Go was not installed on the Mac; installed 1.27.0 via Homebrew. The `go` directive in
+  `go.mod` was deliberately lowered from the generated `1.27.0` to `1.24`, so contributors on
+  distro-packaged Go can build without chasing the newest toolchain. Nothing in the design needs
+  anything newer.
 
 ### Stage 3: Honest starting README
 - What it is, what it is for, and a status line saying plainly that it does not work yet.
@@ -68,10 +72,15 @@ output has to be a folder of files a Go binary serves.
 - **Done when:** the licensing sentence exists in the spec.
 - **Status:** todo
 
-### Stage 5: Repo layout and Makefile
+### Stage 5: Repo layout, compiling stubs, and Makefile
 - `cmd/core`, `cmd/dashboard`, `internal/`, `web/`, `scripts/`.
+- **Minimal `main.go` stubs in both `cmd/` directories that actually compile.** Added to this stage
+  after Stage 2: with no Go packages at all, `go vet ./...` exits 1 ("no packages to vet"), which
+  would make the Stage 6 CI red on an empty tree. The first real Go code is not until Stage 10, so
+  the stubs have to come from here.
 - Makefile targets for `linux/arm64`, `linux/amd64`, `linux/arm` (armv7), and host.
-- **Done when:** `make build-all` produces binaries for all three Linux targets from the Mac.
+- **Done when:** `make build-all` produces binaries for all three Linux targets from the Mac, and
+  both `go build ./...` and `go vet ./...` exit 0.
 - **Status:** todo
 
 ### Stage 6: Push to GitHub, wire CI
@@ -521,3 +530,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   block anything.
 - **2026-08-30, after Stage 1:** Stage 4 reduced to just the licensing note, because `PLAN.md` and
   `PROTOCOL.md` already existed on disk and went into the first commit rather than waiting.
+- **2026-08-30, after Stage 2:** Stage 5 gained compiling `main.go` stubs. Discovered while
+  verifying Stage 2: `go vet ./...` exits non-zero when a module contains no packages, so the Stage 6
+  CI would have gone red immediately on a repo that is public from commit one. Also recorded the
+  deliberate `go 1.24` floor rather than the toolchain's `1.27.0`.

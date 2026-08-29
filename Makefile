@@ -12,7 +12,7 @@ LDFLAGS := -s -w -X $(MODULE)/internal/version.Version=$(VERSION)
 BINARIES  := core dashboard
 PLATFORMS := linux/arm64 linux/amd64 linux/arm
 
-.PHONY: all build build-all check vet fmt test clean dev-up dev-down dev-logs dev-shell dev-printers
+.PHONY: all build build-all check vet fmt test test-integration clean dev-up dev-down dev-logs dev-shell dev-printers
 
 all: build
 
@@ -46,6 +46,13 @@ fmt:
 
 test:
 	$(GO) test ./...
+
+# Tests that need the development CUPS. Skipped by a bare `make test`, and by CI,
+# which has no container to talk to.
+DEV_CUPS ?= http://127.0.0.1:6631
+
+test-integration:
+	PRINTER_CYCLE_TEST_CUPS=$(DEV_CUPS) $(GO) test ./... -count=1 -v
 
 clean:
 	rm -rf bin dist

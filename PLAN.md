@@ -183,7 +183,22 @@ actually ships CUPS 3.x.
 - `http.Client` with a `DialContext` that speaks either a Unix socket path or a TCP address, chosen
   by config. `Content-Type: application/ipp`.
 - **Done when:** a raw request reaches cupsd in the container and a response comes back.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** `internal/ipp`. One `Do` method serves both transports: `unix:///run/cups/cups.sock`
+  for production and `http://127.0.0.1:6631` for the container, chosen by endpoint scheme, so nothing
+  above this layer knows or cares which is in use.
+- `Do` takes an optional body reader streamed straight after the encoded message. The combined length
+  is unknown, so Go sends the request chunked, which is what will let Stage 17 and Stage 35 push a
+  large document through without holding it in memory.
+- `NewRequest` centralises the two attributes RFC 8011 requires first in every operation group, and
+  hands out non-zero incrementing request ids. A test locks both down, because CUPS is lenient about
+  the ordering and other IPP servers are not.
+- Integration tests are gated behind `PRINTER_CYCLE_TEST_CUPS`, so `make test` and CI skip them and
+  stay green with no container. `make test-integration` runs them against the dev environment.
+- **Proof it works:** the round trip returned `client-error-not-found`, since the container has no
+  default printer. That is the right result: an IPP-level answer means the message was encoded, sent,
+  parsed by cupsd, answered, and decoded, with matching request ids. A transport failure would have
+  looked nothing like it.
 
 ### Stage 11: First real request, Get-Printers
 - Build, encode, send, decode with `goipp`. Map into a Go `Printer` struct.
@@ -634,3 +649,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-30, after Stage 9:** Phase 1 complete. No structural change. Following the new document
   from a torn-down state surfaced a timing gap in the discovery check, now documented. The
   development environment needs only Go and Docker: no printer, no Pi.
+- **2026-08-30, after Stage 10:** no structural change. Established the pattern the rest of Phase 2
+  follows: unit tests run everywhere, anything needing a real cupsd is gated behind
+  `PRINTER_CYCLE_TEST_CUPS` so CI never depends on a container.

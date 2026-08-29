@@ -1,0 +1,127 @@
+package ipp_test
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/OpenPrinting/goipp"
+	"github.com/mhd64real/printer-cycle/internal/ipp"
+)
+
+func TestNewAcceptsSupportedEndpointForms(t *testing.T) {
+	valid := []string{
+		"unix:///run/cups/cups.sock",
+		"http://127.0.0.1:6631",
+		"https://cups.example:631",
+	}
+	for _, ep := range valid {
+		if _, err := ipp.New(ep); err != nil {
+			t.Errorf("New(%q) = %v, want no error", ep, err)
+		}
+	}
+
+	invalid := []string{
+		"",                    // no scheme at all
+		"ipp://host/",         // ipp is the protocol, not the transport
+		"unix://",             // no socket path
+		"http://",             // no host
+		"/run/cups/cups.sock", // a bare path is not an endpoint
+	}
+	for _, ep := range invalid {
+		if _, err := ipp.New(ep); err == nil {
+			t.Errorf("New(%q) returned no error, want one", ep)
+		}
+	}
+}
+
+func TestURIsAreBuiltForCUPS(t *testing.T) {
+	c, err := ipp.New("http://127.0.0.1:6631")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := c.RootURI(), "ipp://127.0.0.1:6631/"; got != want {
+		t.Errorf("RootURI() = %q, want %q", got, want)
+	}
+	if got, want := c.PrinterURI("file-ps"), "ipp://127.0.0.1:6631/printers/file-ps"; got != want {
+		t.Errorf("PrinterURI() = %q, want %q", got, want)
+	}
+	// Users name printers things like "Office Laser". If escaping is wrong the
+	// resulting URI is invalid and CUPS rejects the whole operation.
+	if got, want := c.PrinterURI("Office Laser"), "ipp://127.0.0.1:6631/printers/Office%20Laser"; got != want {
+		t.Errorf("PrinterURI() with a space = %q, want %q", got, want)
+	}
+}
+
+func TestNewRequestMeetsRFC8011(t *testing.T) {
+	c, err := ipp.New("http://127.0.0.1:6631")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := c.NewRequest(goipp.OpCupsGetDefault)
+	second := c.NewRequest(goipp.OpCupsGetDefault)
+
+	// RFC 8011 requires a request-id greater than zero, and CUPS matches
+	// responses to requests by it, so repeats would be silently confusing.
+	if first.RequestID == 0 {
+		t.Error("request id is zero, RFC 8011 requires greater than zero")
+	}
+	if first.RequestID == second.RequestID {
+		t.Errorf("two requests share id %d, they must be distinct", first.RequestID)
+	}
+
+	// RFC 8011 requires these two attributes, in this order, before any other
+	// operation attribute. CUPS is lenient about it; other IPP servers are not.
+	if len(first.Operation) < 2 {
+		t.Fatalf("operation group has %d attributes, want at least 2", len(first.Operation))
+	}
+	if got, want := first.Operation[0].Name, "attributes-charset"; got != want {
+		t.Errorf("first operation attribute = %q, want %q", got, want)
+	}
+	if got, want := first.Operation[1].Name, "attributes-natural-language"; got != want {
+		t.Errorf("second operation attribute = %q, want %q", got, want)
+	}
+}
+
+// TestRoundTripAgainstCUPS is the point of this stage: proving a request built
+// here reaches a real cupsd and a real response comes back.
+//
+// It needs the development environment, so it is skipped unless
+// PRINTER_CYCLE_TEST_CUPS is set. That keeps CI green without a container.
+func TestRoundTripAgainstCUPS(t *testing.T) {
+	endpoint := os.Getenv("PRINTER_CYCLE_TEST_CUPS")
+	if endpoint == "" {
+		t.Skip("set PRINTER_CYCLE_TEST_CUPS to run this: make dev-up, then make test-integration")
+	}
+
+	c, err := ipp.New(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req := c.NewRequest(goipp.OpCupsGetDefault)
+	req.Operation.Add(goipp.MakeAttribute("printer-uri", goipp.TagURI, goipp.String(c.RootURI())))
+
+	resp, err := c.Do(ctx, "/", req, nil)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+
+	// The transport is what is under test. A well formed IPP response carrying
+	// the request id back proves the exchange worked end to end. Whether a
+	// default printer happens to be configured is not this test\'s business, so
+	// the status code is logged rather than asserted.
+	if resp.RequestID != req.RequestID {
+		t.Errorf("response request id = %d, want %d", resp.RequestID, req.RequestID)
+	}
+	if resp.Version != req.Version {
+		t.Errorf("response version = %v, want %v", resp.Version, req.Version)
+	}
+	t.Logf("cupsd answered, status %s", goipp.Status(resp.Code))
+}

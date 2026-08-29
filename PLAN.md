@@ -63,7 +63,9 @@ output has to be a folder of files a Go binary serves.
 - Explicit note that scanning is out of scope.
 - **Done when:** a stranger landing on the repo understands the idea and is not misled about
   readiness.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** the connector licensing sentence went into the README here as well, since that is where
+  a prospective connector author actually looks first. Stage 4 still owns putting it in the spec.
 
 ### Stage 4: Add the licensing note to the protocol spec
 - `PROTOCOL.md` was committed in Stage 1, so only the licensing section is left to write.
@@ -534,3 +536,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   verifying Stage 2: `go vet ./...` exits non-zero when a module contains no packages, so the Stage 6
   CI would have gone red immediately on a repo that is public from commit one. Also recorded the
   deliberate `go 1.24` floor rather than the toolchain's `1.27.0`.
+- **2026-08-30, after Stage 3:** no structural change. The README carries the connector licensing
+  note in addition to Stage 4's copy in the spec, because that is the first place a connector author
+  looks.

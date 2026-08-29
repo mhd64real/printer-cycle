@@ -203,7 +203,26 @@ actually ships CUPS 3.x.
 ### Stage 11: First real request, Get-Printers
 - Build, encode, send, decode with `goipp`. Map into a Go `Printer` struct.
 - **Done when:** the two virtual queues from Stage 8 come back as typed Go values.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** both queues come back fully typed:
+
+```
+file-ps   state=idle  model="Generic PostScript Printer"  device=file:///var/spool/pc-out/file-ps.out
+file-pcl  state=idle  model="Generic PCL Laser Printer"   device=file:///var/spool/pc-out/file-pcl.out
+```
+
+- **`resp.Groups` has to be walked directly.** goipp also exposes named per-group fields on Message,
+  but a multi-printer response carries one Printer group per queue and those fields flatten them all
+  together. Using them would have silently produced one merged printer out of many.
+- The attribute helpers are forgiving on purpose: a missing attribute yields the zero value, never an
+  error. Old printers omit a great deal, and failing on every omission would break the software on
+  exactly the hardware it exists for.
+- Marker levels follow the design decision that unknown is a legitimate answer. A negative level means
+  the printer never reported one, which must not be confused with zero, since zero means empty. Test
+  covers ragged marker arrays, where a printer returns fewer levels than names.
+- Requests name the attributes they want rather than taking everything, keeping responses small on a
+  box with a dozen queues.
+- The status handling here is a placeholder, deliberately. Stage 12 replaces it with typed errors.
 
 ### Stage 12: Status codes to Go errors
 - Map IPP status codes onto Go error values, and those onto the JSON-RPC codes in PROTOCOL.md
@@ -652,3 +671,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-30, after Stage 10:** no structural change. Established the pattern the rest of Phase 2
   follows: unit tests run everywhere, anything needing a real cupsd is gated behind
   `PRINTER_CYCLE_TEST_CUPS` so CI never depends on a container.
+- **2026-08-30, after Stage 11:** no structural change. Worth recording one trap avoided: goipp's
+  named per-group fields on Message would have flattened a multi-printer response into a single
+  merged printer, so group walking is mandatory for anything that returns more than one of a thing.
+  That applies to Stage 13 (devices), Stage 15 (PPDs) and Stage 18 (jobs) as well.

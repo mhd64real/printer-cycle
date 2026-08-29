@@ -91,7 +91,12 @@ func TestNewRequestMeetsRFC8011(t *testing.T) {
 //
 // It needs the development environment, so it is skipped unless
 // PRINTER_CYCLE_TEST_CUPS is set. That keeps CI green without a container.
-func TestRoundTripAgainstCUPS(t *testing.T) {
+// integrationClient returns a client pointed at the development CUPS, or skips
+// the test when there is not one. CI has no container, so every test that needs
+// a real cupsd goes through here.
+func integrationClient(t *testing.T) *ipp.Client {
+	t.Helper()
+
 	endpoint := os.Getenv("PRINTER_CYCLE_TEST_CUPS")
 	if endpoint == "" {
 		t.Skip("set PRINTER_CYCLE_TEST_CUPS to run this: make dev-up, then make test-integration")
@@ -101,6 +106,11 @@ func TestRoundTripAgainstCUPS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return c
+}
+
+func TestRoundTripAgainstCUPS(t *testing.T) {
+	c := integrationClient(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -124,4 +134,52 @@ func TestRoundTripAgainstCUPS(t *testing.T) {
 		t.Errorf("response version = %v, want %v", resp.Version, req.Version)
 	}
 	t.Logf("cupsd answered, status %s", goipp.Status(resp.Code))
+}
+
+// TestPrintersAgainstCUPS is the point of this stage: the two virtual queues the
+// development environment creates should come back as typed Go values, not as
+// text to be picked apart.
+func TestPrintersAgainstCUPS(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	printers, err := c.Printers(ctx)
+	if err != nil {
+		t.Fatalf("Printers: %v", err)
+	}
+
+	byName := make(map[string]ipp.Printer, len(printers))
+	names := make([]string, 0, len(printers))
+	for _, p := range printers {
+		byName[p.Name] = p
+		names = append(names, p.Name)
+	}
+
+	for _, want := range []string{"file-ps", "file-pcl"} {
+		p, ok := byName[want]
+		if !ok {
+			t.Fatalf("queue %q missing, got %v. Run: make dev-printers", want, names)
+		}
+
+		if p.State != ipp.PrinterStateIdle {
+			t.Errorf("%s: state = %s, want idle", want, p.State)
+		}
+		if !p.AcceptingJobs {
+			t.Errorf("%s: not accepting jobs", want)
+		}
+		if p.DeviceURI == "" {
+			t.Errorf("%s: device-uri is empty", want)
+		}
+		if p.MakeAndModel == "" {
+			t.Errorf("%s: printer-make-and-model is empty", want)
+		}
+		if p.URI == "" {
+			t.Errorf("%s: printer-uri-supported is empty", want)
+		}
+
+		t.Logf("%-9s state=%-10s model=%-28q device=%s",
+			p.Name, p.State, p.MakeAndModel, p.DeviceURI)
+	}
 }

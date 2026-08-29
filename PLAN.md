@@ -41,7 +41,10 @@ output has to be a folder of files a Go binary serves.
   first commit.
 - `.gitignore` for Go, node, build output, SQLite files.
 - **Done when:** `git log` after the first commit shows the right author and committer.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** default branch `main`. The machine global identity was already correct; repo-local was
+  set anyway so a clone on another machine inherits it. First commit also carried `PLAN.md` and
+  `PROTOCOL.md`, which were already sitting in the folder, so Stage 4 shrank.
 
 ### Stage 2: Licence and Go module
 - `LICENSE` with the full GPLv3 text.
@@ -58,11 +61,11 @@ output has to be a folder of files a Go binary serves.
   readiness.
 - **Status:** todo
 
-### Stage 4: Move the protocol spec in, add the licensing note
-- `PROTOCOL.md` lands at the repo root.
-- Add a short section stating that implementing this protocol creates no licensing obligation, so
-  connector authors can licence their own repos however they want.
-- **Done when:** the spec is committed and the licensing sentence exists.
+### Stage 4: Add the licensing note to the protocol spec
+- `PROTOCOL.md` was committed in Stage 1, so only the licensing section is left to write.
+- A short section stating that implementing this protocol creates no licensing obligation, so
+  connector authors can licence their own repos however they like.
+- **Done when:** the licensing sentence exists in the spec.
 - **Status:** todo
 
 ### Stage 5: Repo layout and Makefile
@@ -516,3 +519,5 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-30:** plan created. Written for a Mac-only build with Docker CUPS, a public repo from the
   first commit, and a full launch. Hardware stages quarantined in Phase 9 rather than allowed to
   block anything.
+- **2026-08-30, after Stage 1:** Stage 4 reduced to just the licensing note, because `PLAN.md` and
+  `PROTOCOL.md` already existed on disk and went into the first commit rather than waiting.

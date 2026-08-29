@@ -137,7 +137,32 @@ output has to be a folder of files a Go binary serves.
     DNS-SD as a real IPP Everywhere printer for `CUPS-Get-Devices` to find.
 - **Done when:** a job submitted by hand reaches `done` and produces a file, AND `lpinfo -v` inside
   the container lists the virtual network printer.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** the virtual printer needed its own container, not just another process beside cupsd. The
+  first attempt ran `ippeveprinter` next to CUPS and the dnssd backend logged "Ignoring local service
+  Virtual Office Printer", because it deliberately skips what the local machine advertises. Split
+  into a second container with its own network namespace, cross-container mDNS works and cupsd now
+  sees it the way it would see real hardware, UUID and TXT record included.
+- Queues are `file-ps` (Generic PostScript) and `file-pcl` (Generic PCL laser). The PCL one matters
+  more: it runs the Ghostscript rasterisation chain, which is the path every old printer depends on.
+  Verified by inspecting the output, which begins with the PCL reset sequence `ESC E`, so the chain
+  genuinely ran rather than passing bytes through.
+- Reproducible from nothing with `make dev-down && make dev-up && make dev-printers`.
+
+### Evidence on the CUPS 3.0 driver risk (recorded here 2026-08-30)
+
+The design session flagged that CUPS 3.0 intends to remove printer drivers, which threatens this
+project's entire premise. Running `lpadmin` produced the warning first-hand:
+
+```
+lpadmin: Printer drivers are deprecated and will stop working in a future version of CUPS.
+```
+
+The concrete position, from the target platform rather than from recollection: **Debian trixie ships
+CUPS 2.4.10 and cups-filters 1.28.17. Drivers are deprecated but fully working, and CUPS 3.0 is not
+in the distribution.** Raspberry Pi OS follows Debian, so the same holds there. printer-cycle is
+viable today and the risk is future tense, not present tense. Revisit when a distro this targets
+actually ships CUPS 3.x.
 
 ### Stage 9: Document the dev loop
 - `docs/development.md`: start the container, create the queues, run core, what to expect.
@@ -440,6 +465,9 @@ output has to be a folder of files a Go binary serves.
 
 ### Stage 58: Install CUPS and every driver
 - Driver-only split packages, never the full vendor suites.
+- Expect `lpadmin` to print a driver deprecation warning on every queue creation. It is noise, not a
+  failure, on CUPS 2.4.x. The install script should not treat it as an error, and the dashboard
+  should not surface it to users.
 - **Done when:** a bare container ends with cupsd running and the driver set present.
 - **Status:** todo
 
@@ -592,3 +620,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   avahi-daemon and an `ippeveprinter` virtual network printer. Logged against Stage 13 that SNMP
   discovery stays untestable until real hardware exists, since that is the path that finds the exact
   printers this product targets.
+- **2026-08-30, after Stage 8:** the virtual printer had to move into its own container; the CUPS
+  dnssd backend ignores locally advertised services, so the first arrangement would have made
+  discovery look testable while testing nothing. Also resolved the CUPS 3.0 driver risk down to a
+  fact rather than a worry: the target platform ships CUPS 2.4.10 with drivers deprecated but
+  working. Noted against Stage 58 that the deprecation warning is expected output, not a failure.

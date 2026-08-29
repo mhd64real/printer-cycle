@@ -12,7 +12,7 @@ LDFLAGS := -s -w -X $(MODULE)/internal/version.Version=$(VERSION)
 BINARIES  := core dashboard
 PLATFORMS := linux/arm64 linux/amd64 linux/arm
 
-.PHONY: all build build-all check vet fmt test clean dev-up dev-down dev-logs dev-shell
+.PHONY: all build build-all check vet fmt test clean dev-up dev-down dev-logs dev-shell dev-printers
 
 all: build
 
@@ -55,6 +55,9 @@ clean:
 
 dev-up:
 	docker compose -f dev/compose.yml up -d --build
+
+dev-printers:
+	docker exec printer-cycle-cups /usr/local/bin/create-printers.sh
 
 dev-down:
 	docker compose -f dev/compose.yml down

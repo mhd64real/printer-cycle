@@ -1,9 +1,25 @@
+# Two containers on one network, on purpose.
+#
+# The virtual printer is separate from cupsd because the CUPS dnssd backend
+# ignores services advertised by the local machine. Giving the printer its own
+# network namespace makes cupsd discover it the way it would discover real
+# hardware on a LAN.
+
 services:
   cups:
     build: .
     image: printer-cycle-dev-cups
     container_name: printer-cycle-cups
+    command: ["/usr/local/bin/entrypoint-cups.sh"]
     # 6631 on the host, because macOS runs its own cupsd on 631.
     ports:
       - "127.0.0.1:6631:631"
+    restart: unless-stopped
+
+  printer:
+    image: printer-cycle-dev-cups
+    container_name: printer-cycle-virtual-printer
+    command: ["/usr/local/bin/entrypoint-printer.sh"]
+    depends_on:
+      - cups
     restart: unless-stopped

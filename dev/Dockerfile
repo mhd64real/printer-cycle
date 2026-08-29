@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       cups-filters \
       cups-ipp-utils \
       ghostscript \
+      avahi-daemon \
+      avahi-utils \
+      dbus \
       foomatic-db-engine \
       foomatic-db-compressed-ppds \
       openprinting-ppds \
@@ -37,6 +40,11 @@ RUN echo "FileDevice Yes" >> /etc/cups/cups-files.conf
 
 COPY cupsd.conf /etc/cups/cupsd.conf
 
+COPY entrypoint-cups.sh entrypoint-printer.sh create-printers.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint-cups.sh \
+             /usr/local/bin/entrypoint-printer.sh \
+             /usr/local/bin/create-printers.sh
+
 EXPOSE 631
 
-CMD ["/usr/sbin/cupsd", "-f"]
+CMD ["/usr/local/bin/entrypoint-cups.sh"]

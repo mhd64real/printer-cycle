@@ -12,7 +12,7 @@ LDFLAGS := -s -w -X $(MODULE)/internal/version.Version=$(VERSION)
 BINARIES  := core dashboard
 PLATFORMS := linux/arm64 linux/amd64 linux/arm
 
-.PHONY: all build build-all check vet fmt test clean
+.PHONY: all build build-all check vet fmt test clean dev-up dev-down dev-logs dev-shell
 
 all: build
 
@@ -49,3 +49,18 @@ test:
 
 clean:
 	rm -rf bin dist
+
+# Development environment: CUPS in a container, reachable on 127.0.0.1:6631.
+# 6631 rather than 631 because macOS runs its own cupsd on 631.
+
+dev-up:
+	docker compose -f dev/compose.yml up -d --build
+
+dev-down:
+	docker compose -f dev/compose.yml down
+
+dev-logs:
+	docker compose -f dev/compose.yml logs -f
+
+dev-shell:
+	docker exec -it printer-cycle-cups bash

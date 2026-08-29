@@ -115,12 +115,28 @@ output has to be a folder of files a Go binary serves.
 - **Done when:** `http://localhost:631` serves the CUPS web UI from the container.
 - **Why TCP and not a socket:** IPP is the same protocol either way, only the transport differs, and
   TCP from the Mac into the container keeps the Go build native and the loop fast.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** `debian:trixie-slim`, built arm64 on Apple Silicon, which happens to match the Pi
+  target. Image is 512MB and carries **17,974 PPDs**, so driver ranking in Phase 6 gets developed
+  against a realistic catalogue rather than a toy one. Published on **127.0.0.1:6631**, not 631,
+  because macOS runs its own cupsd on 631. Authentication is off entirely: production reaches cupsd
+  over a Unix socket where peer credentials identify an `lpadmin` user and no password is ever sent,
+  and no-auth-over-TCP reproduces that observable behaviour more faithfully than basic auth would.
+  `FileDevice Yes` goes in `cups-files.conf`, not `cupsd.conf`, since CUPS 1.6. Make targets
+  `dev-up`, `dev-down`, `dev-logs`, `dev-shell` added.
 
-### Stage 8: Virtual printers for end to end tests
+### Stage 8: Virtual printers, including one that can be discovered
 - A script that creates two queues in the container: one PostScript, one that writes output to a
   file so job completion can be verified byte for byte.
-- **Done when:** a job submitted by hand reaches `done` and produces a file.
+- **Added after Stage 7, and the reason matters.** The container as built can discover nothing. The
+  `dnssd` backend exits with "Unable to create Avahi client" because no avahi-daemon is running, and
+  `usb` has nothing to enumerate. Without a fix, Stages 13, 14, 32 and 33 could be written but never
+  actually verified. So this stage also has to provide something discoverable:
+  - `avahi-daemon` running in the CUPS container so the `dnssd` backend works at all.
+  - A second container running `ippeveprinter` (from `cups-ipp-utils`), advertising itself over
+    DNS-SD as a real IPP Everywhere printer for `CUPS-Get-Devices` to find.
+- **Done when:** a job submitted by hand reaches `done` and produces a file, AND `lpinfo -v` inside
+  the container lists the virtual network printer.
 - **Status:** todo
 
 ### Stage 9: Document the dev loop
@@ -153,7 +169,12 @@ output has to be a folder of files a Go binary serves.
 ### Stage 13: Discovery, CUPS-Get-Devices
 - Call it with a timeout, decode the device list, expose device URI, device ID, make and model, and
   transport.
-- **Done when:** the container's backends return a device list into Go structs.
+- **Done when:** the container's backends return a device list into Go structs, including the
+  virtual IPP printer from Stage 8.
+- **Known gap, honest about it:** the `dnssd` path becomes testable via Stage 8's virtual printer,
+  but **SNMP discovery cannot be tested without either real hardware or a simulated SNMP printer
+  agent.** SNMP is the path that finds exactly the old network lasers this product exists for, so
+  this is not a trivial gap. It stays unverified until Phase 9.
 - **Status:** todo
 
 ### Stage 14: Streaming discovery
@@ -565,3 +586,9 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-30, after Stage 6:** Phase 0 complete. No structural change. Action versions bumped to
   v7 for the Node 20 deprecation, and CI reads the Go version from `go.mod` so it never drifts from
   the module. A CI badge went into the README.
+- **2026-08-30, after Stage 7:** Stage 8 grew a second job. Running the backends by hand showed the
+  container can discover nothing at all: `dnssd` cannot reach an Avahi client and `usb` has no
+  devices, so four later stages would have been written blind. Stage 8 now also stands up
+  avahi-daemon and an `ippeveprinter` virtual network printer. Logged against Stage 13 that SNMP
+  discovery stays untestable until real hardware exists, since that is the path that finds the exact
+  printers this product targets.

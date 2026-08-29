@@ -1,0 +1,9 @@
+services:
+  cups:
+    build: .
+    image: printer-cycle-dev-cups
+    container_name: printer-cycle-cups
+    # 6631 on the host, because macOS runs its own cupsd on 631.
+    ports:
+      - "127.0.0.1:6631:631"
+    restart: unless-stopped

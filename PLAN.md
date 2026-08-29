@@ -87,7 +87,12 @@ output has to be a folder of files a Go binary serves.
 - Makefile targets for `linux/arm64`, `linux/amd64`, `linux/arm` (armv7), and host.
 - **Done when:** `make build-all` produces binaries for all three Linux targets from the Mac, and
   both `go build ./...` and `go vet ./...` exit 0.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** all six binaries cross-compile from the Mac and `file` confirms each architecture,
+  including ARM aarch64 for the Zero 2 W. `CGO_ENABLED=0` throughout, so everything is statically
+  linked with no libc dependency on the target. `internal/version` holds a `Version` var stamped at
+  link time by the Makefile, which Stage 75 will need at release. Empty `web/` and `scripts/` carry
+  `.gitkeep` for now. Stub arm64 binary is 1.5MB.
 
 ### Stage 6: Push to GitHub, wire CI
 - Create the public repo, push, set description and topics.
@@ -194,6 +199,9 @@ output has to be a folder of files a Go binary serves.
 
 ### Stage 21: SQLite and migrations
 - `modernc.org/sqlite`, never the cgo driver, so cross-compilation stays one command.
+- This is now enforced mechanically rather than by discipline: the Makefile from Stage 5 builds with
+  `CGO_ENABLED=0`, so a cgo driver fails `make build-all` immediately instead of silently producing
+  a binary that only runs on the build host.
 - A tiny embedded migration runner.
 - **Done when:** a fresh database is created and migrated on first run.
 - **Status:** todo
@@ -546,3 +554,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-30, after Stage 4:** no structural change. The licensing section also grants the right to
   implement the protocol in a competing core, which was not in the original scope of the stage but
   costs nothing and makes the spec a real protocol rather than a house API.
+- **2026-08-30, after Stage 5:** no structural change; everything worked first time. Noted in Stage
+  21 that `CGO_ENABLED=0` in the Makefile now enforces the pure-Go SQLite decision mechanically: a
+  cgo driver will break the cross-compile loudly rather than quietly producing a host-only binary.

@@ -98,7 +98,12 @@ output has to be a folder of files a Go binary serves.
 - Create the public repo, push, set description and topics.
 - GitHub Actions: build all targets and run `go vet` on every push.
 - **Done when:** the badge is green on a public repo.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Notes:** live at github.com/mhd64real/printer-cycle. CI runs gofmt, vet, test, and the full
+  cross-compile on every push and pull request, green in about 25 seconds. `actions/checkout` and
+  `actions/setup-go` are pinned to v7: v4 and v5 still work but target Node 20, which runners have
+  deprecated, and a warning on every run of a public repo is noise nobody needs. `go-version-file:
+  go.mod` rather than a hardcoded version, so the Go floor lives in exactly one place.
 
 ---
 
@@ -557,3 +562,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-30, after Stage 5:** no structural change; everything worked first time. Noted in Stage
   21 that `CGO_ENABLED=0` in the Makefile now enforces the pure-Go SQLite decision mechanically: a
   cgo driver will break the cross-compile loudly rather than quietly producing a host-only binary.
+- **2026-08-30, after Stage 6:** Phase 0 complete. No structural change. Action versions bumped to
+  v7 for the Node 20 deprecation, and CI reads the Go version from `go.mod` so it never drifts from
+  the module. A CI badge went into the README.

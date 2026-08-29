@@ -2,6 +2,8 @@
 
 A print server for old printers, and for printers whose software is worse than the hardware.
 
+[![ci](https://github.com/mhd64real/printer-cycle/actions/workflows/ci.yml/badge.svg)](https://github.com/mhd64real/printer-cycle/actions/workflows/ci.yml)
+
 ## Status
 
 **Not working yet. There is nothing to install.**

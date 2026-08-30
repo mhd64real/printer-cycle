@@ -25,6 +25,9 @@ web/.vite/
 !.env.example
 *.local
 
+# Development queue output
+dev/out/
+
 # Runtime state
 /run/
 setup-token

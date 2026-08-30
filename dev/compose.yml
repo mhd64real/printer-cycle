@@ -14,6 +14,10 @@ services:
     # 6631 on the host, because macOS runs its own cupsd on 631.
     ports:
       - "127.0.0.1:6631:631"
+    # Queue output, bind-mounted so tests on the host can check printed bytes
+    # directly instead of shelling into the container to read them.
+    volumes:
+      - ./out:/var/spool/pc-out
     restart: unless-stopped
 
   printer:

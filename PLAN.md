@@ -383,11 +383,51 @@ drv:///hpcups.drv/hp-laserjet_1018.ppd       HP LaserJet 1018, hpcups 3.22.10, r
 - IPP header first, then document bytes, through an `io.Pipe`, so nothing large is ever fully
   resident.
 - **Done when:** a PDF prints to the file-backed queue and the output file matches expectations.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+
+**The memory claim, proven:**
+
+```
+job 11: sent 32 MB, peak heap growth 0.1 MB
+```
+
+A sampling goroutine watches `HeapAlloc` throughout the transfer while the document is generated on
+the fly, so it exists nowhere else. If the client were buffering, the heap would follow the document.
+
+The filter chain also verified end to end: 33 bytes of text became 172,538 bytes of PostScript with
+Ghostscript's own invocation line in the header.
+
+- **A serious finding about CUPS 2.4: raw printing fails silently.** A job submitted as
+  `application/vnd.cups-raw` or `application/octet-stream` is accepted, reports
+  `job-completed-successfully`, and **produces no output whatsoever.** No error, no warning, nothing
+  in the log. That is the worst failure mode a print server can have, because the user is told it
+  worked. Consequences recorded against Stage 35 and Stage 37.
+- **`printer-is-shared: false` blocks remote submission.** CUPS refuses print jobs from a remote
+  client to an unshared queue: "The printer or class is not shared." Production is unaffected, since
+  core reaches cupsd over its Unix socket and that counts as local. But the dev environment talks
+  TCP, so its queues must be shared, and so must any deployment pointing core at CUPS on another
+  machine.
+- **The Print-Job response is minimal**: job-uri, job-id, job-state, job-state-message,
+  job-state-reasons, and nothing else. No byte accounting, so verifying that all 32MB actually
+  reached CUPS needs `job-k-octets` from Get-Job-Attributes. Moved to Stage 18.
+- **Printed text does not survive into the PostScript.** The chain embeds a font subset and draws
+  glyphs, so asserting the literal string appears in the output fails. Checked rather than assumed;
+  the test asserts structure instead.
+- `dev/out` is now bind-mounted from the container, so tests read printed bytes directly on the host
+  rather than shelling into Docker.
+- **Known flake, to be fixed in Stage 18.** The 32MB job leaves CUPS grinding through Ghostscript
+  after the test returns, which starved a later test in the same run and made it time out. Once
+  Cancel-Job exists, the streaming test should cancel its job after measuring.
 
 ### Stage 18: Job queries and cancel
 - `Get-Job-Attributes`, `Get-Jobs`, `Cancel-Job`.
-- **Done when:** a submitted job can be read back and cancelled mid-flight.
+- **Carried over from Stage 17:**
+  - Verify `job-k-octets` matches what was sent, which is the only way to confirm every byte of a
+    large document reached CUPS. The Print-Job response does not carry it.
+  - Make the streaming test cancel its 32MB job after measuring. Left running, it starves the rest of
+    the suite and makes a later test time out.
+- **Done when:** a submitted job can be read back and cancelled mid-flight, and the streaming test no
+  longer leaves CUPS busy.
 - **Status:** todo
 
 ### Stage 19: Subscriptions and the event loop
@@ -496,7 +536,12 @@ drv:///hpcups.drv/hp-laserjet_1018.ppd       HP LaserJet 1018, hpcups 3.22.10, r
 
 ### Stage 35: jobs.submit and binary streaming
 - Allocate a stream id, accept binary frames, pipe them into Print-Job.
-- **Done when:** a 50MB file prints without core's memory rising meaningfully.
+- **Validate the document format, added after Stage 17.** On CUPS 2.4, a job whose format CUPS cannot
+  filter is accepted, reported as `job-completed-successfully`, and prints nothing at all. Core must
+  not pass an arbitrary format straight through: reject formats the target queue does not list in
+  `document-format-supported`, so a connector gets an error instead of a user getting silence.
+- **Done when:** a 50MB file prints without core's memory rising meaningfully, and an unsupported
+  document format is refused rather than silently discarded.
 - **Status:** todo
 
 ### Stage 36: jobs.commit, integrity, and timeouts
@@ -506,7 +551,11 @@ drv:///hpcups.drv/hp-laserjet_1018.ppd       HP LaserJet 1018, hpcups 3.22.10, r
 
 ### Stage 37: job.updated push
 - Fan the Stage 19 event channel out to whichever connector owns each job.
-- **Done when:** a connector receives state changes it never asked for, in order.
+- **Detect the silent-success case, added after Stage 17.** CUPS can complete a job having produced
+  nothing. A job reaching `completed` with zero impressions is almost certainly a format the filter
+  chain could not handle, and it must not be reported to the user as a successful print.
+- **Done when:** a connector receives state changes it never asked for, in order, and a job that
+  completed without printing anything is not reported as success.
 - **Status:** todo
 
 ### Stage 38: Identity linking
@@ -840,3 +889,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   free text which core sanitises into a CUPS queue name, since CUPS forbids spaces and users type
   them constantly. Recorded the `printer-is-shared: false` decision, which prevents CUPS and the
   AirPrint connector both advertising the same printer.
+- **2026-08-30, after Stage 17:** found that CUPS 2.4 accepts raw and unfilterable jobs, reports them
+  completed successfully, and prints nothing. Added format validation to Stage 35 and silent-success
+  detection to Stage 37, because a print server that lies about success is worse than one that fails.
+  Byte accounting and a fix for the flaky 32MB job both moved to Stage 18, where Cancel-Job lands.

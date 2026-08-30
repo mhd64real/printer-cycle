@@ -1,9 +1,13 @@
 package ipp_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -340,14 +344,19 @@ func TestDiscoveryIsProgressive(t *testing.T) {
 		}
 	}
 
-	// The collected form must agree with the streaming form, since one is now
-	// built on the other.
+	// The collected form is built on the streaming form, so it must also work.
+	//
+	// Counts are deliberately NOT compared between the two calls. Discovery is
+	// not deterministic: mDNS answers arrive when they arrive, and two runs
+	// seconds apart legitimately see different numbers of services. An earlier
+	// version of this test asserted the counts matched and failed intermittently
+	// for that reason, which was the test being wrong rather than the code.
 	batch, err := c.Devices(ctx, 10*time.Second)
 	if err != nil {
 		t.Fatalf("Devices: %v", err)
 	}
-	if len(batch) != len(arrivals) {
-		t.Errorf("Devices returned %d, DiscoverDevices delivered %d", len(batch), len(arrivals))
+	if len(batch) == 0 {
+		t.Error("Devices returned nothing while DiscoverDevices found devices")
 	}
 }
 
@@ -543,4 +552,194 @@ func TestAddAndDeletePrinterAgainstCUPS(t *testing.T) {
 	if _, err := c.Printer(ctx, name); !errors.Is(err, ipp.ErrNotFound) {
 		t.Errorf("after deletion, Printer returned %v, want ErrNotFound", err)
 	}
+}
+
+// devOut is the queue output directory, bind-mounted from the CUPS container so
+// tests can check printed bytes directly.
+const devOut = "../../dev/out"
+
+// scratchQueue creates a throwaway queue writing to its own file, and returns
+// the queue name and the host path of that file.
+func scratchQueue(t *testing.T, c *ipp.Client, name, ppd string) (string, string) {
+	t.Helper()
+
+	if _, err := os.Stat(devOut); err != nil {
+		t.Skipf("%s is not present; run make dev-up", devOut)
+	}
+
+	hostPath := filepath.Join(devOut, name+".out")
+	_ = os.Remove(hostPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_ = c.DeletePrinter(ctx, name)
+	err := c.AddPrinter(ctx, ipp.PrinterSpec{
+		Name:      name,
+		DeviceURI: "file:///var/spool/pc-out/" + name + ".out",
+		PPDName:   ppd,
+		Info:      "printer-cycle test queue",
+
+		// Shared, which production queues are not.
+		//
+		// CUPS refuses print jobs submitted from a remote client to a queue
+		// that is not shared: "The printer or class is not shared." Production
+		// reaches cupsd over its Unix socket, which counts as local, so an
+		// unshared queue is both correct and preferable there, since sharing
+		// would have CUPS advertise the printer alongside the connector that is
+		// already advertising it. The development environment talks over TCP
+		// and therefore counts as remote, so these queues must be shared.
+		Shared: true,
+	})
+	if err != nil {
+		t.Fatalf("creating scratch queue: %v", err)
+	}
+	t.Cleanup(func() {
+		cctx, ccancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer ccancel()
+		_ = c.DeletePrinter(cctx, name)
+	})
+	return name, hostPath
+}
+
+// waitForFile waits for a queue to finish writing its output.
+func waitForFile(t *testing.T, path string, wantSize int, timeout time.Duration) []byte {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) >= wantSize {
+			return data
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("no output at %s after %v: %v", path, timeout, err)
+	}
+	t.Fatalf("output at %s is %d bytes after %v, want at least %d", path, len(data), timeout, wantSize)
+	return nil
+}
+
+// TestPrintJobThroughTheFilterChain prints ordinary text and lets CUPS do its
+// real work: texttopdf, then Ghostscript, then the PostScript driver. That is
+// the path an actual user takes, and the path every old printer depends on.
+func TestPrintJobThroughTheFilterChain(t *testing.T) {
+	c := integrationClient(t)
+	queue, hostPath := scratchQueue(t, c, "pc-test-filtered", "drv:///sample.drv/generic.ppd")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	job, err := c.PrintJob(ctx, queue, strings.NewReader("printer-cycle filter chain check\n"), ipp.PrintOptions{
+		JobName: "filtered",
+		Format:  "text/plain",
+	})
+	if err != nil {
+		t.Fatalf("PrintJob: %v", err)
+	}
+	if job.ID == 0 {
+		t.Error("no job id returned")
+	}
+
+	got := waitForFile(t, hostPath, 1024, 60*time.Second)
+
+	if !bytes.HasPrefix(got, []byte("%!PS")) {
+		t.Error("output does not begin with a PostScript header, so the filter chain did not run")
+	}
+	// Ghostscript names itself in the output it generates, which is direct
+	// evidence the rasterisation chain ran rather than bytes being copied.
+	if !bytes.Contains(got[:min(2048, len(got))], []byte("gs ")) {
+		t.Error("no Ghostscript invocation in the output header")
+	}
+
+	// The literal text is deliberately not asserted. It does not survive: the
+	// chain embeds a font subset and draws glyphs, so "printer-cycle filter
+	// chain check" appears nowhere in the PostScript. Checked, not assumed.
+	t.Logf("job %d turned 33 bytes of text into %d bytes of PostScript", job.ID, len(got))
+}
+
+// TestPrintJobStreamsWithoutBuffering is the memory claim the whole design rests
+// on. A 32MB document must leave this process without ever being resident, or a
+// Pi Zero 2 W sharing 512MB between the OS, cupsd and Ghostscript gets an
+// out-of-memory kill the first time somebody prints a large scan.
+//
+// This measures the client, which is what this package is responsible for. That
+// every byte actually reached CUPS is verified in Stage 18, where
+// Get-Job-Attributes exposes job-k-octets.
+func TestPrintJobStreamsWithoutBuffering(t *testing.T) {
+	c := integrationClient(t)
+	queue, _ := scratchQueue(t, c, "pc-test-stream", "drv:///sample.drv/generic.ppd")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	const size = 32 << 20
+
+	// A valid PostScript document padded to 32MB with comment lines. Comments
+	// are cheap for Ghostscript to skip, so the container is not asked to
+	// rasterise a hundred thousand pages just to prove a point about memory.
+	// Generated as it is read: the full document never exists anywhere, so if
+	// the heap grows to its size, this code is what put it there.
+	doc := io.LimitReader(io.MultiReader(
+		strings.NewReader("%!PS-Adobe-3.0\n%%Pages: 1\n"),
+		paddingReader{},
+	), size)
+
+	runtime.GC()
+	var base runtime.MemStats
+	runtime.ReadMemStats(&base)
+
+	var peak uint64
+	stop := make(chan struct{})
+	sampled := make(chan struct{})
+	go func() {
+		defer close(sampled)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			if m.HeapAlloc > peak {
+				peak = m.HeapAlloc
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	job, err := c.PrintJob(ctx, queue, doc, ipp.PrintOptions{
+		JobName: "streaming check",
+		Format:  "application/postscript",
+	})
+	close(stop)
+	<-sampled
+
+	if err != nil {
+		t.Fatalf("PrintJob: %v", err)
+	}
+
+	growth := int64(peak) - int64(base.HeapAlloc)
+	const budget = 16 << 20
+
+	t.Logf("job %d: sent %d MB, peak heap growth %.1f MB", job.ID, size>>20, float64(growth)/(1<<20))
+
+	if growth > budget {
+		t.Errorf("heap grew %.1f MB while sending a %d MB document: it is being buffered, not streamed",
+			float64(growth)/(1<<20), size>>20)
+	}
+}
+
+// paddingReader produces endless PostScript comment lines without allocating.
+type paddingReader struct{}
+
+func (paddingReader) Read(b []byte) (int, error) {
+	const line = "% padding for the streaming test, skipped cheaply by ghostscript\n"
+	for i := range b {
+		b[i] = line[i%len(line)]
+	}
+	return len(b), nil
 }

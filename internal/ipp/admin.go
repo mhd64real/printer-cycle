@@ -39,6 +39,13 @@ type PrinterSpec struct {
 	// connectors, and letting CUPS advertise them too would put one physical
 	// printer on the network twice, under two identities, from the same box.
 	// Users would see duplicates and have no way to tell which to pick.
+	//
+	// One consequence to know about. CUPS conflates advertising with remote
+	// access: it refuses a print job from a remote client to an unshared queue,
+	// answering "The printer or class is not shared." Production is unaffected,
+	// because core reaches cupsd over its Unix socket and that counts as local.
+	// But a core pointed at CUPS on another machine, which the transport does
+	// support, needs its queues shared or nothing will print.
 	Shared bool
 }
 

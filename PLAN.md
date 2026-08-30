@@ -701,7 +701,41 @@ Open the dashboard and enter that token to create the first account.
 ### Stage 27: WebSocket listener
 - `/v1/connector` on TCP, and optionally on a Unix socket path, same handler for both.
 - **Done when:** a `websocat` client connects to both and receives the `hello` notification.
-- **Status:** todo
+- **Status:** done, 2026-08-31. Verified with a **hand-written Python client using no WebSocket
+  library at all**, which is a better check than the Go library talking to itself:
+
+```
+handshake: HTTP/1.1 101 Switching Protocols
+method: hello   protocol: v1   auth: ['ed25519']   nonce bytes: 32
+```
+
+- **`cmd/core` is now a daemon.** It opens its database, performs first-run setup, serves the
+  connector protocol on TCP and optionally a Unix socket, and shuts down on a signal.
+- **Ports: 6310 for the connector protocol, 6311 reserved for the dashboard.** Adjacent to 631, the
+  IPP port, so anyone who knows what the machine does can guess them.
+- **Unix socket paths are length-checked with an explanation.** The kernel caps them at 104 bytes on
+  macOS and the BSDs, 108 on Linux, and exceeding it fails with a bare "invalid argument" that says
+  nothing about the cause. Found by a test whose `t.TempDir()` path was too long, which is exactly how
+  an operator would meet it.
+- Origin checking is off deliberately. Connectors are programs, not browsers, and arrive with no
+  Origin header. Origin checks protect browsers from being used as a confused deputy; they are not
+  what protects core, which is authentication.
+
+**A shutdown bug worth recording, because the obvious fix made it worse.** Shutting down with one
+connector attached took exactly five seconds. Three wrong diagnoses before instrumenting it:
+
+1. Assumed `http.Server.Shutdown` was waiting on the hijacked connection. Reordering so connections
+   close first changed nothing.
+2. Added a 250ms bound falling back to `CloseNow`. Still five seconds. **`CloseNow` serialises behind
+   the `Close` already in flight on the same connection**, so it waits exactly as long as the thing it
+   was supposed to cut short.
+3. Instrumenting showed `closeAll` was the whole five seconds and `Shutdown` took 0.6ms.
+
+The actual cause: the WebSocket closing handshake is a round trip, waiting for the peer to answer,
+and it was being performed **while holding the server's mutex**. A peer that is not reading never
+answers. Now every connection closes concurrently, outside the lock, with the whole operation bounded
+at 500ms; anything still waiting is abandoned, since the process is stopping and the socket goes with
+it. Test asserts shutdown completes in under two seconds with a connector attached.
 
 ### Stage 28: JSON-RPC message layer
 - Encode and decode, request and response correlation by id, notifications, both directions.
@@ -1146,3 +1180,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   enrolment and first-run setup all done. `cmd/core` is a real program rather than a stub, though it
   exits after setup because the connector server is Phase 4. Stage 26 is honestly half-finished:
   everything core owns works, and Stage 44 supplies the browser half.
+- **2026-08-31, after Stage 27:** added a Unix socket path length check after hitting the kernel limit
+  in a test, since the raw failure is "invalid argument" and explains nothing. Recorded the shutdown
+  investigation in full: two plausible fixes made no difference before instrumenting showed the real
+  cause, and `CloseNow` as a fallback for a stuck `Close` does not work at all.

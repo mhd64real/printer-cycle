@@ -4,23 +4,26 @@
 // part of the system that talks to CUPS. Connectors reach it over the WebSocket
 // protocol described in PROTOCOL.md; nothing, including the dashboard, gets a
 // path around that.
-//
-// The protocol server itself is not built yet. See PLAN.md, Phase 4.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
+	"github.com/mhd64real/printer-cycle/internal/protocol"
 	"github.com/mhd64real/printer-cycle/internal/store"
 	"github.com/mhd64real/printer-cycle/internal/version"
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintln(os.Stderr, "printer-cycle-core:", err)
 		os.Exit(1)
 	}
@@ -30,6 +33,8 @@ func run() error {
 	var (
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		dataDir     = flag.String("data-dir", defaultDataDir(), "where the database and setup token live")
+		listenAddr  = flag.String("listen", protocol.DefaultTCPAddr, "address to serve the connector protocol on")
+		socketPath  = flag.String("socket", "", "additional unix socket for connectors on this machine")
 	)
 	flag.Parse()
 
@@ -38,7 +43,12 @@ func run() error {
 		return nil
 	}
 
-	ctx := context.Background()
+	// Cancelled on the first interrupt, so a second one can still kill a stuck
+	// process rather than being swallowed.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	log := slog.Default()
 
 	db, err := store.Open(filepath.Join(*dataDir, "printer-cycle.db"))
 	if err != nil {
@@ -50,20 +60,27 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("first-run setup: %w", err)
 	}
-
 	if issued {
 		tokenPath := filepath.Join(*dataDir, "setup-token")
 		if err := writeSetupToken(tokenPath, token); err != nil {
 			return err
 		}
 		printSetupBanner(token, tokenPath)
-	} else {
-		fmt.Printf("printer-cycle-core %s, database at %s\n", version.Version, *dataDir)
 	}
 
-	// The connector server lands in Phase 4. Saying so is better than sitting
-	// idle and looking like a daemon that works.
-	fmt.Fprintln(os.Stderr, "the connector server is not implemented yet, see PLAN.md phase 4")
+	addrs := []string{*listenAddr}
+	if *socketPath != "" {
+		addrs = append(addrs, *socketPath)
+	}
+
+	log.Info("printer-cycle core starting", "version", version.Version, "data", *dataDir)
+
+	server := protocol.NewServer(db, protocol.Options{Logger: log})
+	if err := server.Serve(ctx, addrs...); err != nil {
+		return err
+	}
+
+	log.Info("stopped")
 	return nil
 }
 

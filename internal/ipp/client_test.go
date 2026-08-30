@@ -350,3 +350,91 @@ func TestDiscoveryIsProgressive(t *testing.T) {
 		t.Errorf("Devices returned %d, DiscoverDevices delivered %d", len(batch), len(arrivals))
 	}
 }
+
+// The IEEE 1284 id of an HP LaserJet 1018: a cheap host-based laser from 2005,
+// squarely the kind of printer this project exists to revive.
+const laserJet1018 = "MFG:Hewlett-Packard;MDL:HP LaserJet 1018;CMD:ZJS;"
+
+// TestPPDsNarrowByDeviceID is the point of this stage. A full installation
+// carries close to eighteen thousand drivers. Asking a user to find theirs in
+// that list is the experience printer-cycle exists to replace, so narrowing by
+// what the hardware reports about itself has to work.
+func TestPPDsNarrowByDeviceID(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	got, err := c.PPDs(ctx, ipp.PPDFilter{DeviceID: laserJet1018})
+	if err != nil {
+		t.Fatalf("PPDs: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("no candidates for a printer the installed drivers definitely cover")
+	}
+	if len(got) > 50 {
+		t.Errorf("%d candidates: that is not narrowing, that is still a haystack", len(got))
+	}
+
+	var foo2zjs bool
+	for _, p := range got {
+		t.Logf("%-52s %s", p.Name, p.MakeAndModel)
+		if strings.Contains(p.Name, "foo2zjs") {
+			foo2zjs = true
+		}
+	}
+	if !foo2zjs {
+		t.Error("the LaserJet 1018 is a foo2zjs printer; that driver should be among the candidates")
+	}
+}
+
+// A filter matching nothing has to be an empty result, not a failure. Callers
+// need to tell "no driver claims this printer" apart from "the query broke",
+// and the first will happen often enough to be routine.
+func TestPPDsUnmatchedFilterIsEmptyNotAnError(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	got, err := c.PPDs(ctx, ipp.PPDFilter{DeviceID: "MFG:NoSuchCompany;MDL:No Such Printer 9000;"})
+	if err != nil {
+		t.Fatalf("an unmatched filter returned an error, want an empty result: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d candidates for a printer that does not exist", len(got))
+	}
+}
+
+func TestPPDsLimitIsHonoured(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	got, err := c.PPDs(ctx, ipp.PPDFilter{Limit: 5})
+	if err != nil {
+		t.Fatalf("PPDs: %v", err)
+	}
+	if len(got) == 0 || len(got) > 5 {
+		t.Errorf("got %d drivers, want between 1 and 5", len(got))
+	}
+}
+
+// Records the real size and cost of the unfiltered catalogue, which is the
+// argument for always filtering. Logs rather than asserts, since the number
+// depends on which driver packages are installed.
+func TestPPDCatalogueSize(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	all, err := c.PPDs(ctx, ipp.PPDFilter{})
+	if err != nil {
+		t.Fatalf("PPDs: %v", err)
+	}
+	t.Logf("unfiltered catalogue: %d drivers, fetched and decoded in %v",
+		len(all), time.Since(start).Round(10*time.Millisecond))
+}

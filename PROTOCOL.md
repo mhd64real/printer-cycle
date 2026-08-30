@@ -312,9 +312,16 @@ nothing but an IP.
 ```
 
 CUPS narrows by device id for free, because PPDs carry a `1284DeviceID` field and `CUPS-Get-PPDs`
-accepts a `ppd-device-id` filter. What CUPS does NOT do is rank the several candidates it returns,
-so core applies its own preference ranking plus an override list for matches that look correct and
-print garbage. The first candidate is what the one-click pair button uses.
+accepts a `ppd-device-id` filter. Narrowing is not selecting, though: measured against a full driver
+installation, a LaserJet 4 device id returns 33 candidates including a Color LaserJet 4730 MFP, which
+is a different printer. So core applies its own ranking plus an override list for matches that look
+correct and print garbage. The first candidate is what the one-click pair button uses.
+
+Two signals arrive inside `ppd-make-and-model` and both are ranking inputs:
+
+- `(recommended)`, which foomatic PPDs carry, is CUPS's own hint.
+- `requires proprietary plugin` marks a driver that depends on a closed vendor binary. Those are
+  x86-only and will never run on an ARM board, so they must never be the automatic choice there.
 
 ```json
 {"result":{"candidates":[

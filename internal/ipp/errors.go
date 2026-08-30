@@ -126,3 +126,7 @@ func check(op goipp.Op, resp *goipp.Message) error {
 		Message: str(resp.Operation, "status-message"),
 	}
 }
+
+// errorsIsNotFound is errors.Is(err, ErrNotFound), spelled out so callers inside
+// this package read as intent rather than plumbing.
+func errorsIsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }

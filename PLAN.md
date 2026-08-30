@@ -326,7 +326,35 @@ change instead. Worth doing, since the whole stage rested on that assumption.
 ### Stage 15: PPD listing with device-id filter
 - `CUPS-Get-PPDs`, both the full list and filtered by `ppd-device-id`.
 - **Done when:** a device ID string returns only its candidate PPDs.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+
+**The core promise of this product, demonstrated.** 17,974 drivers narrowed to two, from nothing but
+what the hardware says about itself:
+
+```
+MFG:Hewlett-Packard;MDL:HP LaserJet 1018;CMD:ZJS;
+
+foo2zjs:0/ppd/foo2zjs/HP-LaserJet_1018.ppd   HP LaserJet 1018 Foomatic/foo2zjs-z1 (recommended)
+drv:///hpcups.drv/hp-laserjet_1018.ppd       HP LaserJet 1018, hpcups 3.22.10, requires proprietary plugin
+```
+
+- **Correction to a design assumption: CUPS does give a ranking hint.** The design session concluded
+  CUPS returns candidates unranked. Not quite: foomatic PPDs carry `(recommended)` inside
+  `ppd-make-and-model`. That is a real signal and Stage 54 should use it as an input rather than
+  inventing preferences from scratch.
+- **`requires proprietary plugin` also appears in that field**, and it is exactly the x86-binary wall
+  from the design. On this printer, hpcups needs HP's closed plugin, which will never run on ARM,
+  while foo2zjs is open and works. Ranking must prefer foo2zjs here, and the text is detectable.
+- **CUPS's matching is loose and produces false positives, so the ranking table is genuinely needed.**
+  Measured: `MFG:HP;MDL:LaserJet 4;CMD:PCL;` returns 33 candidates including "HP Color LaserJet 4610"
+  and "HP Color LaserJet 4730 MFP", which are different printers. `MDL:Stylus Photo R300` also matches
+  an R3000. Narrowing is not selecting.
+- **Filtered queries take 2 to 5 seconds**, because CUPS scans the entire catalogue to apply the
+  filter. Driver lookup is therefore not interactive-speed, and the unfiltered catalogue costs 2.6s
+  and megabytes of decoding on a fast Mac, which is a bad idea on a Zero 2 W. See the caching note
+  added to Stage 54.
+- An unmatched filter returns an empty result rather than an error, so callers can tell "no driver
+  claims this printer" apart from "the query broke".
 
 ### Stage 16: Create and delete printers
 - `CUPS-Add-Modify-Printer` and `CUPS-Delete-Printer`.
@@ -557,13 +585,29 @@ change instead. Worth doing, since the whole stage rested on that assumption.
 - **Done when:** real device ID strings parse correctly, including malformed ones.
 - **Status:** todo
 
-### Stage 54: Candidate ranking
-- The preference table as data, not code. Rank the candidates CUPS returns unranked.
-- **Done when:** a device with several candidates gets a deterministic, sensible first choice.
+### Stage 54: Candidate ranking, and caching
+- The preference table as data, not code.
+- **Inputs now known, measured in Stage 15 rather than guessed:**
+  - `(recommended)` inside `ppd-make-and-model`, which foomatic PPDs carry. A real hint from CUPS,
+    contradicting the design-session assumption that no ranking signal exists.
+  - `requires proprietary plugin` in the same field, which flags drivers depending on closed vendor
+    binaries. Those are the x86-only wall: rank them below any open alternative, and never pick one
+    as the automatic choice on ARM.
+  - Exact `MDL:` match beats a substring match. CUPS's filtering is loose: a LaserJet 4 query returns
+    Color LaserJet 4610 and 4730 MFP, and a Stylus Photo R300 query returns an R3000.
+- **Caching, added after Stage 15.** A filtered PPD query costs 2 to 5 seconds because CUPS scans the
+  whole catalogue. The pairing screen cannot pay that on every keystroke or every page load, so
+  candidate lookups need caching keyed by device id, invalidated when driver packages change.
+- **Done when:** a device with several candidates gets a deterministic, sensible first choice, the
+  LaserJet 1018 picks foo2zjs over hpcups, and a repeat lookup is instant.
 - **Status:** todo
 
 ### Stage 55: Overrides and firmware flags
 - The known-bad match list, and the flag for models needing non-redistributable firmware.
+- Also flag drivers whose `ppd-make-and-model` says `requires proprietary plugin`. Distinct from the
+  firmware case: firmware is downloadable given a network, whereas a proprietary plugin is an x86
+  binary that will never run on ARM at all. The dashboard has to say which of the two it is, because
+  one is a wait and the other is a wall.
 - **Done when:** an HP LaserJet 1018 is flagged as needing a firmware download before pairing, in
   plain language.
 - **Status:** todo
@@ -768,3 +812,10 @@ Every change to this plan gets a line here, so the reasoning survives.
   the plan named, for goroutine-lifetime and error-handling reasons recorded in the stage. Noted
   against Stage 46 that a discovered device surfaces only when the next one is found, which the
   pairing UI has to account for rather than implying the list is complete early.
+- **2026-08-30, after Stage 15:** a design assumption corrected by measurement. CUPS does emit a
+  ranking hint, `(recommended)` in `ppd-make-and-model`, which the design session had concluded did
+  not exist; Stage 54 now uses it as an input. Also found `requires proprietary plugin` in the same
+  field, which detects the x86-only driver wall automatically, and confirmed with numbers that CUPS
+  matching produces false positives (LaserJet 4 matching Color LaserJet 4730 MFP), so the ranking
+  table is necessary rather than merely nice. Added caching to Stage 54: filtered queries cost 2 to 5
+  seconds, which no interactive screen can pay repeatedly.

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -889,5 +890,102 @@ func TestPauseAndResumeAgainstCUPS(t *testing.T) {
 	}
 	if resumed.State != ipp.PrinterStateIdle {
 		t.Errorf("state = %s after resuming, want idle", resumed.State)
+	}
+}
+
+// TestWatchDeliversJobEvents is what Stage 19 exists to establish: that core can
+// learn about job progress from CUPS rather than interrogating it.
+func TestWatchDeliversJobEvents(t *testing.T) {
+	c := integrationClient(t)
+	queue, _ := scratchQueue(t, c, "pc-test-watch", "drv:///sample.drv/generic.ppd")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	type seen struct {
+		kind  string
+		state ipp.JobState
+	}
+
+	var (
+		mu      sync.Mutex
+		events  []seen
+		watchOK = make(chan error, 1)
+	)
+
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+
+	go func() {
+		watchOK <- c.Watch(watchCtx, ipp.WatchOptions{
+			Printer:        queue,
+			ActiveInterval: 200 * time.Millisecond,
+			IdleInterval:   400 * time.Millisecond,
+			LeaseDuration:  60 * time.Second,
+		}, func(e ipp.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, seen{e.Type, e.JobState})
+		})
+	}()
+
+	// Give the subscription a moment to exist before creating something to
+	// report, or the event that matters happens before anyone is listening.
+	time.Sleep(1 * time.Second)
+
+	job, err := c.PrintJob(ctx, queue, strings.NewReader("watch me print\n"), ipp.PrintOptions{
+		JobName: "watched",
+		Format:  "text/plain",
+	})
+	if err != nil {
+		t.Fatalf("PrintJob: %v", err)
+	}
+
+	// Wait for the job to reach a terminal state, as reported by the events.
+	deadline := time.Now().Add(30 * time.Second)
+	var completed bool
+	for time.Now().Before(deadline) && !completed {
+		time.Sleep(200 * time.Millisecond)
+		mu.Lock()
+		for _, e := range events {
+			if e.state.Terminal() {
+				completed = true
+			}
+		}
+		mu.Unlock()
+	}
+
+	stopWatch()
+	if err := <-watchOK; err != nil && !errors.Is(err, context.Canceled) {
+		t.Errorf("Watch returned %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for _, e := range events {
+		t.Logf("event %-22s job-state=%s", e.kind, e.state)
+	}
+	if len(events) == 0 {
+		t.Fatalf("job %d printed but no events arrived", job.ID)
+	}
+	if !completed {
+		t.Error("no event reported the job reaching a terminal state")
+	}
+
+	var created, changed bool
+	for _, e := range events {
+		switch e.kind {
+		case "job-created":
+			created = true
+		case "job-state-changed", "job-completed":
+			changed = true
+		}
+	}
+	if !created {
+		t.Error("no job-created event")
+	}
+	if !changed {
+		t.Error("no job state change event, so progress could not be reported to a connector")
 	}
 }

@@ -197,14 +197,24 @@ func parseJob(attrs goipp.Attributes) Job {
 
 	// CUPS reports the owning queue as a URI. The last path element is the
 	// queue name, which is what everything above this layer works in.
-	if uri := str(attrs, "job-printer-uri"); uri != "" {
-		if i := strings.LastIndex(uri, "/"); i >= 0 && i+1 < len(uri) {
-			if name, err := url.PathUnescape(uri[i+1:]); err == nil {
-				job.Printer = name
-			}
-		}
-	}
+	job.Printer = printerNameFromURI(str(attrs, "job-printer-uri"))
 	return job
+}
+
+// printerNameFromURI pulls the queue name out of a CUPS printer URI.
+func printerNameFromURI(uri string) string {
+	if uri == "" {
+		return ""
+	}
+	i := strings.LastIndex(uri, "/")
+	if i < 0 || i+1 >= len(uri) {
+		return ""
+	}
+	name, err := url.PathUnescape(uri[i+1:])
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 // jobFields is what we ask CUPS for about a job.

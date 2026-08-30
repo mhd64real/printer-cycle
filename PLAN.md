@@ -459,13 +459,47 @@ CUPS accounted for 32.0 MB of the 32 MB sent
 - `Create-Printer-Subscription`, then a `Get-Notifications` loop with lease renewal, emitting job
   state changes on a channel.
 - **Done when:** printing a document produces state change events with no polling anywhere.
-- **Status:** todo
+- **Status:** done, 2026-08-30, **but the done-when was wrong and had to be revised.**
 
-### Stage 20: Measure idle cost, and write the fallback if needed
-- Measure CPU with the subscription loop idle. If subscriptions prove unreliable, add internal
-  polling behind the same channel interface so nothing above it changes.
-- **Done when:** idle CPU is measured and recorded in `docs/`, and the event channel is dependable
-  either way.
+**Revised done-when:** printing a document produces state change events through a subscription, and
+core makes one small event request rather than interrogating job state.
+
+**The full lifecycle now arrives as events:**
+
+```
+job-created            job-state=pending
+printer-state-changed
+job-state-changed      job-state=processing
+job-completed          job-state=completed
+```
+
+- **The design assumption was wrong, and this is the measurement that settles it. CUPS 2.4.10 does
+  not honour `notify-wait`.** `Get-Notifications` returns immediately whether or not anything is
+  waiting, so there is no long poll and no way to sit idle until CUPS speaks. CUPS also advertises
+  `notify-get-interval: 60`, meaning it expects clients to ask once a minute, which is useless for
+  showing somebody their print job moving.
+- **So core polls the event stream on an interval it chooses**, adaptive: 500ms while things are
+  happening, backing off to 2s after five empty replies. That is still much better than the design
+  it replaces, because one small request covers every printer and every job on the box, where polling
+  job state means a request per queue and grows with the number of printers.
+- **Nothing above this layer is affected**, exactly as predicted when the earlier "this could force a
+  rewrite" claim was walked back. Connectors still receive pushed `job.updated` notifications and
+  never poll anything. The polling is entirely inside core, where nobody else can see it.
+- Lease renewal happens at half the lease duration, so a missed renewal has a full period to recover
+  in rather than dropping events at once. The subscription is cancelled on shutdown.
+- Test runs under `-race` and covers the whole lifecycle from job-created to job-completed.
+
+### Stage 20: Measure idle cost, and tune the intervals
+- **Sharpened by Stage 19, which found the answer to the question this stage was hedging.** There is
+  no fallback to write: CUPS does not long-poll, so the event loop already polls. What is left is
+  measuring what that costs and choosing the intervals from evidence rather than from taste.
+- Measure CPU and request volume with the loop idle, at the current defaults of 500ms active and 2s
+  idle. Numbers matter here: a Pi Zero 2 W has four slow cores and this runs forever.
+- If idle cost is meaningful, add a wake mechanism so core can poll immediately after submitting a
+  job and idle much more slowly the rest of the time, since core already knows when it has just
+  created work worth watching.
+- **Done when:** idle CPU and request rate are measured and recorded in `docs/`, and the intervals
+  are justified by those numbers.
 - **Status:** todo
 
 ---
@@ -928,3 +962,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   Recorded against Stage 59 that CUPS silently blanks job names and owners for clients outside its
   SystemGroup, which makes the `lpadmin` membership a correctness requirement and not only an
   permissions one.
+- **2026-08-30, after Stage 19:** a design assumption disproved by measurement. CUPS 2.4.10 ignores
+  `notify-wait` and advertises a 60 second poll interval, so core cannot sit idle waiting to be told.
+  Stage 19's done-when was rewritten rather than quietly satisfied. Stage 20 changed shape as a
+  result: there is no fallback left to write, only intervals to justify with numbers. The connector
+  protocol is untouched, which is the whole reason that layering exists.

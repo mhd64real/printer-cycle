@@ -592,7 +592,23 @@ enrolment flow, since a brand new connector has no key to sign with until it reg
 ### Stage 23: Users
 - Create, list, delete. Argon2id password hashing. First user is admin.
 - **Done when:** users round-trip through the database and a wrong password is rejected.
-- **Status:** todo
+- **Status:** done, 2026-08-31
+- **Argon2id parameters were chosen for the target machine, not copied from a server guide.** RFC 9106
+  offers a 2 GiB profile and a 64 MiB one for constrained machines. Even 64 MiB is wrong here: the box
+  has 512 MiB total, shared with cupsd and with Ghostscript, which spikes hard while rasterising.
+  Several people signing in at once must not be able to push it into an out-of-memory kill. So the
+  RFC's low-memory option: **19 MiB, two passes, one lane.** Measured at 15ms per hash on this
+  machine, which puts a Pi Zero 2 W somewhere around 150 to 290ms. Acceptable for a sign-in.
+- Parameters are read back out of the stored PHC string rather than from constants, so raising the
+  cost later cannot lock anybody out of an account created before the change. Tested.
+- **An unknown username is charged the cost of a hash.** Returning instantly for a name that does not
+  exist, while a wrong password takes a hundred milliseconds, is enough to enumerate who has an
+  account on the box. Both paths return the same error and spend the same work.
+- **The last administrator cannot be deleted or demoted.** Either would leave a box nobody can
+  configure, recoverable only by editing the database by hand.
+- **Identifiers are ULID-shaped and sort by creation time**, so listings come out in order without an
+  index on a timestamp. Crockford base32, which omits I, L, O and U, because these identifiers end up
+  being read aloud and typed by hand in support conversations.
 
 ### Stage 24: Connector registry and enrolment
 - Install a connector record, issue a single-use enrolment token, store scopes.
@@ -1057,3 +1073,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-31:** connector authentication changed from HMAC-SHA256 to Ed25519, before any code or
   connector depended on it. Core now stores only public keys. PROTOCOL.md section 4 rewritten with
   domain separation and a single-use enrolment token flow; Stages 24 and 25 rewritten to match.
+- **2026-08-31, after Stage 23:** no structural change. Argon2id sized for 512 MiB shared with
+  Ghostscript rather than for a server, and the timing-equalisation on unknown usernames recorded,
+  since both are the kind of decision that looks arbitrary later without the reason attached.

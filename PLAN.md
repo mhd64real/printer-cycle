@@ -535,7 +535,24 @@ combined:          0.079% of one core
   a binary that only runs on the build host.
 - A tiny embedded migration runner.
 - **Done when:** a fresh database is created and migrated on first run.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **The pure-Go driver holds up.** `internal/store` cross-compiles with `CGO_ENABLED=0` to
+  linux/arm64, linux/arm and linux/amd64, so building a Pi binary from the Mac is still one command.
+  Cost: the arm64 binary grows from 1.5MB to 6.1MB, which is nothing on an SD card and cheap for
+  never fighting a cross-compilation toolchain.
+- **One connection, deliberately.** `SetMaxOpenConns(1)`. WAL allows many readers beside one writer,
+  but exploiting that means separate read and write pools and a steady supply of SQLITE_BUSY bugs.
+  printer-cycle serves a household: a few users, a handful of connectors, queries touching tens of
+  rows. Serialising removes a whole category of concurrency bug at a cost that does not exist here.
+- **Pragmas are read back rather than assumed.** They are set through the connection string, where a
+  typo fails silently: SQLite keeps its defaults and nothing complains. A test asserts each one took
+  effect, since `foreign_keys` quietly off would turn every declared relationship into a comment.
+- **WAL plus `synchronous(NORMAL)` because the disk is an SD card.** FULL syncs on every commit,
+  which writes far more and wears the card out faster, for protection against losing power at exactly
+  the wrong instant. NORMAL still survives a process crash.
+- Migration runner is deliberately dependency free: numbered SQL files, each applied once inside a
+  transaction, recorded in `schema_migrations`. A test pins that reopening does not reapply them,
+  since a runner that re-ran migrations would destroy data on every restart.
 
 ### Stage 22: Schema
 - `users`, `printers`, `connectors`, `connector_scopes`, `connector_settings`, `identity_links`,
@@ -993,3 +1010,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   design rested on has been measured rather than assumed. Two turned out wrong (CUPS does not
   long-poll; CUPS does emit a ranking hint) and both were corrected in place. `docs/performance.md`
   now holds the numbers behind the design decisions, so later stages can argue with evidence.
+- **2026-08-30, after Stage 21:** no structural change. Recorded the size cost of the pure-Go SQLite
+  driver (1.5MB to 6.1MB on arm64) and the decision to serialise database access with a single
+  connection, which suits a household-scale print server and removes a class of concurrency bug.

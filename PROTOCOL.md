@@ -117,7 +117,7 @@ core      -> connector : result: current settings values
 {"jsonrpc":"2.0","method":"hello","params":{
   "protocol":"v1",
   "core_version":"0.1.0",
-  "nonce":"b64:9f3a...",
+  "nonce":"9f3aBc...base64...",
   "auth":["ed25519"]
 }}
 ```
@@ -127,7 +127,7 @@ core      -> connector : result: current settings values
 ```json
 {"jsonrpc":"2.0","id":1,"method":"authenticate","params":{
   "connector_id":"telegram-bot",
-  "proof":"b64:Ed25519_sign(private_key, \"printer-cycle-connector-auth-v1\\x00\" || nonce)"
+  "proof":"base64 of Ed25519_sign(private_key, \"printer-cycle-connector-auth-v1\\x00\" || nonce)"
 }}
 ```
 
@@ -137,8 +137,13 @@ worth nothing to an attacker. Nothing secret crosses the wire either, so a liste
 captures a one-time signature that is useless on the next connection. Together those are what make
 plaintext acceptable on a home network without dragging certificate management onto a Raspberry Pi.
 
+Both `nonce` and `proof` are standard base64, unadorned. An earlier draft prefixed them with `b64:`,
+which every connector author would have had to strip forever for no benefit.
+
 **The signed message is domain separated.** A connector signs the fixed ASCII string
-`printer-cycle-connector-auth-v1`, a zero byte, then the raw nonce. Signing bare server-supplied
+`printer-cycle-connector-auth-v1`, a zero byte, then the raw nonce. The nonce is 32 bytes from a
+cryptographically secure source, and is good for exactly one connection and one authentication
+attempt. Signing bare server-supplied
 bytes would let a hostile core collect a signature that meant something in a different protocol. The
 prefix costs nothing and closes that off.
 

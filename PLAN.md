@@ -645,7 +645,18 @@ enrolment flow, since a brand new connector has no key to sign with until it reg
   another protocol.
 - **Done when:** a correct signature authenticates, a signature over a previous connection's nonce is
   refused, and a signature missing the domain prefix is refused.
-- **Status:** todo
+- **Status:** done, 2026-08-31. `internal/connauth`, all tests under `-race`.
+- **Domain separation is tested, not merely documented.** A signature over the bare nonce is refused,
+  so the prefix is load bearing rather than decorative. Without that test it would be possible to
+  quietly drop the prefix on one side and never notice.
+- **A challenge is spent by failure as well as by success.** Leaving the nonce usable after a bad
+  proof would turn one connection into unlimited attempts. Guessing an Ed25519 signature is not a
+  practical attack, but there is no reason to leave unlimited tries available on purpose.
+- **`Message()` is exported and its exact byte layout is pinned by a test.** Connector authors in
+  other languages have to reproduce it, and the definition should come from one place rather than
+  from each of them reading the specification and hoping.
+- **Spec tidied while here:** `nonce` and `proof` are plain base64. The draft prefixed them with
+  `b64:`, which every connector author would have stripped forever for no benefit.
 
 ### Stage 26: First-run bootstrap
 - On an empty database, core prints a one-time setup token to stdout and writes it to a file with
@@ -1098,3 +1109,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-31, after Stage 24:** Ed25519 enrolment implemented as decided. Added migration
   0003 for enrolment tokens, which the Stage 22 schema did not anticipate because the flow did not
   exist until the auth decision was made.
+- **2026-08-31, after Stage 25:** removed the `b64:` prefix from the spec's nonce and proof fields
+  before anyone had to implement it. Small, but it is exactly the kind of thing that is free to fix
+  now and permanent once connectors exist.

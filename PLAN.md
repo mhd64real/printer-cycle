@@ -585,23 +585,31 @@ Same shape, same round trips, an available library in every language worth writi
 PROTOCOL.md already sends `auth` as a list, so adding it is additive, and section 4 is still marked
 PROPOSED with nothing depending on it yet.
 
-The schema supports either through `auth_method` and `credential`, so Stage 24 can implement whichever
-Mohamed chooses. Not decided here, because changing a security decision in the protocol is not a call
-to make quietly.
+**RESOLVED 2026-08-31: Ed25519.** Mohamed chose it. PROTOCOL.md section 4 rewritten, `docs/schema.md`
+updated, Stages 24 and 25 rewritten to match. The spec also gained the domain-separation detail and an
+enrolment flow, since a brand new connector has no key to sign with until it registers one.
 
 ### Stage 23: Users
 - Create, list, delete. Argon2id password hashing. First user is admin.
 - **Done when:** users round-trip through the database and a wrong password is rejected.
 - **Status:** todo
 
-### Stage 24: Connector registry and tokens
-- Install a connector record, generate its shared secret, store scopes.
-- **Done when:** a connector can be registered and its secret issued once, never readable again.
-- **Status:** todo
+### Stage 24: Connector registry and enrolment
+- Install a connector record, issue a single-use enrolment token, store scopes.
+- **Decided 2026-08-31: Ed25519, not HMAC.** The connector generates a keypair on first run and
+  registers its public key using the enrolment token. Core stores only public keys, so it never holds
+  anything that could impersonate a connector and a leaked database is worth nothing. See the open
+  decision recorded under Stage 22 and PROTOCOL.md section 4.
+- **Done when:** a connector can be enrolled with a single-use token, its public key is stored, and
+  the token cannot be reused.
 
-### Stage 25: HMAC nonce verification
-- Per-connection nonce, `HMAC-SHA256(secret, nonce)` verification, constant-time comparison.
-- **Done when:** a correct proof authenticates and a replayed one from a previous connection fails.
+### Stage 25: Ed25519 nonce verification
+- Per-connection random nonce, Ed25519 signature verification against the stored public key.
+- The signed message is domain separated: `"printer-cycle-connector-auth-v1" || 0x00 || nonce`.
+  Signing bare server-supplied bytes would let a hostile core collect a signature meaningful in
+  another protocol.
+- **Done when:** a correct signature authenticates, a signature over a previous connection's nonce is
+  refused, and a signature missing the domain prefix is refused.
 - **Status:** todo
 
 ### Stage 26: First-run bootstrap
@@ -1046,3 +1054,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   authentication forces core to store every connector's secret in recoverable form, so reading the
   database file is enough to impersonate all of them. Ed25519 would leave core holding only public
   keys. The schema was built to support either, and Stage 24 implements whichever is chosen.
+- **2026-08-31:** connector authentication changed from HMAC-SHA256 to Ed25519, before any code or
+  connector depended on it. Core now stores only public keys. PROTOCOL.md section 4 rewritten with
+  domain separation and a single-use enrolment token flow; Stages 24 and 25 rewritten to match.

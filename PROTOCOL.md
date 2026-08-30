@@ -118,7 +118,7 @@ core      -> connector : result: current settings values
   "protocol":"v1",
   "core_version":"0.1.0",
   "nonce":"b64:9f3a...",
-  "auth":["hmac-sha256"]
+  "auth":["ed25519"]
 }}
 ```
 
@@ -127,18 +127,36 @@ core      -> connector : result: current settings values
 ```json
 {"jsonrpc":"2.0","id":1,"method":"authenticate","params":{
   "connector_id":"telegram-bot",
-  "proof":"b64:HMAC_SHA256(secret, nonce)"
+  "proof":"b64:Ed25519_sign(private_key, \"printer-cycle-connector-auth-v1\\x00\" || nonce)"
 }}
 ```
 
-The shared secret is issued by core when the connector is installed and is **never transmitted**.
-The connector proves possession against a per-connection nonce, so a sniffer on the LAN captures a
-one-time value that is worthless on the next connection. This is what makes plaintext acceptable on
-a home network without dragging certificate management onto a Raspberry Pi.
+The connector signs a per-connection nonce with its private key. **Core stores only public keys**, so
+it never holds anything capable of impersonating a connector, and a copied or leaked database is
+worth nothing to an attacker. Nothing secret crosses the wire either, so a listener on the LAN
+captures a one-time signature that is useless on the next connection. Together those are what make
+plaintext acceptable on a home network without dragging certificate management onto a Raspberry Pi.
+
+**The signed message is domain separated.** A connector signs the fixed ASCII string
+`printer-cycle-connector-auth-v1`, a zero byte, then the raw nonce. Signing bare server-supplied
+bytes would let a hostile core collect a signature that meant something in a different protocol. The
+prefix costs nothing and closes that off.
+
+**Enrolment, since a new connector has nothing to sign with yet.** The admin adds the connector in
+the dashboard, which issues a single-use enrolment token. The connector generates its keypair on
+first run, presents the token together with its public key, and core records the key and spends the
+token. From then on it signs nonces. An admin who prefers it can paste a public key in directly
+instead; the token exists for convenience, not as a second trust path.
 
 Honest limit: this authenticates the connection, not each later message, and it does not stop an
 active man in the middle. TLS stays available for anyone who wants it, as a deployment option rather
 than a protocol change.
+
+**Changed 2026-08-31, from HMAC-SHA256.** The earlier draft had the connector prove possession of a
+shared secret. That works, but verifying an HMAC means core must hold the secret in recoverable form,
+so read access to the database file was enough to impersonate every connector on the box. Ed25519
+gives the same handshake shape and the same round trips while leaving core holding only public keys.
+Nothing depended on the old scheme, since section 4 was still marked PROPOSED.
 
 Result:
 

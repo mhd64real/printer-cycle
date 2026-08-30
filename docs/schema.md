@@ -44,25 +44,14 @@ indistinguishable to the person trying to log in.
 **Secret settings are never returned to any client**, the dashboard included. `connector_settings.is_secret`
 marks them.
 
-## An open question: what core stores to authenticate connectors
+## What core stores to authenticate connectors
 
-`connectors.auth_method` and `connectors.credential` are shaped to allow the scheme to change without
-a migration, because there is a real choice here that has not been settled.
+`connectors.auth_method` is `ed25519` and `credential` holds a **public key**.
 
-`PROTOCOL.md` section 4 specifies **HMAC-SHA256 over a per-connection nonce**. The connector never
-transmits its secret, so a listener on the network learns nothing reusable. That property is real and
-it is why plaintext on a home LAN is acceptable.
+Core never stores anything capable of impersonating a connector, so a copied or leaked database file
+is worth nothing to an attacker. See `PROTOCOL.md` section 4.
 
-But verifying an HMAC requires holding the secret. Core cannot store a hash of it. So `credential`
-holds the shared secret in a form core can read back, and the only thing protecting it is file
-permissions on the database. **Anyone who can read the database file can impersonate every connector
-on the box.**
-
-**Ed25519 would remove that.** The connector generates a keypair at install, gives core the public
-key, and signs the nonce. Core stores only public keys, so a copied database is worth nothing to an
-attacker. The exchange is the same shape, the same number of round trips, and every language worth
-writing a connector in has an Ed25519 library. `PROTOCOL.md` already sends `auth` as a list, so
-adding it is additive rather than breaking, and section 4 is still marked PROPOSED.
-
-This is recorded rather than decided, because it changes a security decision in the protocol and that
-is not a call to make quietly. The schema supports either.
+`auth_method` exists so the scheme can change later without a migration. An earlier draft used
+HMAC-SHA256 over a nonce, which works but requires core to hold each connector's secret in readable
+form, making read access to this file equivalent to impersonating every connector on the box. That
+was changed on 2026-08-31, before anything depended on it.

@@ -293,3 +293,60 @@ func TestDevicesAgainstCUPS(t *testing.T) {
 		t.Fatalf("no dnssd device discovered among %d results. Is the virtual printer container up, and did mDNS have a few seconds? Run: make dev-up", len(devices))
 	}
 }
+
+// TestDiscoveryIsProgressive is the point of this stage. Devices must reach the
+// caller as CUPS finds them, not in one batch at the end.
+//
+// The property being checked is the spread between arrivals. If the response
+// were buffered and decoded once at the end, every device would land within
+// microseconds of every other. Measured against the development environment,
+// cupsd answers the fast backends immediately and then trickles devices out over
+// the next couple of seconds.
+func TestDiscoveryIsProgressive(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	type arrival struct {
+		device ipp.Device
+		at     time.Duration
+	}
+
+	start := time.Now()
+	var arrivals []arrival
+
+	err := c.DiscoverDevices(ctx, 10*time.Second, func(d ipp.Device) {
+		arrivals = append(arrivals, arrival{d, time.Since(start)})
+	})
+	if err != nil {
+		t.Fatalf("DiscoverDevices: %v", err)
+	}
+	total := time.Since(start)
+
+	if len(arrivals) == 0 {
+		t.Fatal("no devices discovered. Run: make dev-up")
+	}
+	for _, a := range arrivals {
+		t.Logf("t=%-8v %-8s %s", a.at.Round(10*time.Millisecond), a.device.Transport, a.device.URI)
+	}
+	t.Logf("discovery finished in %v", total.Round(10*time.Millisecond))
+
+	if len(arrivals) > 1 {
+		spread := arrivals[len(arrivals)-1].at - arrivals[0].at
+		if spread < 100*time.Millisecond {
+			t.Errorf("all %d devices arrived within %v of one another; that is a batch, not a stream",
+				len(arrivals), spread.Round(time.Millisecond))
+		}
+	}
+
+	// The collected form must agree with the streaming form, since one is now
+	// built on the other.
+	batch, err := c.Devices(ctx, 10*time.Second)
+	if err != nil {
+		t.Fatalf("Devices: %v", err)
+	}
+	if len(batch) != len(arrivals) {
+		t.Errorf("Devices returned %d, DiscoverDevices delivered %d", len(batch), len(arrivals))
+	}
+}

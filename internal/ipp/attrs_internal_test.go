@@ -187,3 +187,53 @@ func TestParseDeviceTreatsUnknownModelAsAbsent(t *testing.T) {
 		t.Errorf("Transport = %q, want dnssd", d.Transport)
 	}
 }
+
+// decodePrefix runs on bytes that are still arriving, so it is fed truncated
+// messages constantly. It must never panic, and must never claim more groups
+// than the complete message actually contains, or a device would be reported
+// before it had been fully received.
+func TestDecodePrefixNeverOverreadsAPartialMessage(t *testing.T) {
+	device := func(uri, info string) goipp.Group {
+		var attrs goipp.Attributes
+		attrs.Add(goipp.MakeAttribute("device-uri", goipp.TagURI, goipp.String(uri)))
+		attrs.Add(goipp.MakeAttribute("device-info", goipp.TagText, goipp.String(info)))
+		attrs.Add(goipp.MakeAttribute("device-class", goipp.TagKeyword, goipp.String("network")))
+		return goipp.Group{Tag: goipp.TagPrinterGroup, Attrs: attrs}
+	}
+
+	var op goipp.Attributes
+	op.Add(goipp.MakeAttribute("attributes-charset", goipp.TagCharset, goipp.String("utf-8")))
+	op.Add(goipp.MakeAttribute("attributes-natural-language", goipp.TagLanguage, goipp.String("en-us")))
+
+	msg := goipp.NewResponse(goipp.DefaultVersion, goipp.StatusOk, 1)
+	msg.Groups = goipp.Groups{
+		{Tag: goipp.TagOperationGroup, Attrs: op},
+		device("socket://192.168.1.10:9100", "First"),
+		device("socket://192.168.1.11:9100", "Second"),
+	}
+
+	full, err := msg.EncodeBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := decodePrefix(full)
+	if !ok {
+		t.Fatal("decodePrefix rejected a complete message")
+	}
+	if len(got.Groups) != 3 {
+		t.Fatalf("complete message decoded to %d groups, want 3", len(got.Groups))
+	}
+
+	// Every truncation point. A prefix may fail to decode, which is fine and
+	// expected, but it must never report groups that have not fully arrived.
+	for i := range full {
+		m, ok := decodePrefix(full[:i])
+		if !ok {
+			continue
+		}
+		if len(m.Groups) > 3 {
+			t.Fatalf("prefix of %d bytes yielded %d groups, more than the whole message has", i, len(m.Groups))
+		}
+	}
+}

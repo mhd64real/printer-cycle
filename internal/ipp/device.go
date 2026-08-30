@@ -1,7 +1,10 @@
 package ipp
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -38,15 +41,10 @@ type Device struct {
 	Transport string
 }
 
-// Devices asks every CUPS backend what it can find.
-//
-// This is slow by nature. The SNMP backend broadcasts across the subnet and has
-// to wait out its own timeout, so a call takes seconds rather than
-// milliseconds. Nothing user-facing should block on it; Stage 14 delivers
-// results progressively instead.
-//
-// A zero timeout lets CUPS use its own default.
-func (c *Client) Devices(ctx context.Context, timeout time.Duration) ([]Device, error) {
+// endOfAttributes terminates the attribute section of an IPP message.
+const endOfAttributes = 0x03
+
+func (c *Client) devicesRequest(timeout time.Duration) *goipp.Message {
 	req := c.NewRequest(goipp.OpCupsGetDevices)
 	req.Operation.Add(goipp.MakeAttribute("printer-uri", goipp.TagURI, goipp.String(c.RootURI())))
 
@@ -57,25 +55,122 @@ func (c *Client) Devices(ctx context.Context, timeout time.Duration) ([]Device, 
 		}
 		req.Operation.Add(goipp.MakeAttribute("timeout", goipp.TagInteger, goipp.Integer(secs)))
 	}
+	return req
+}
 
-	resp, err := c.Do(ctx, "/", req, nil)
+// DiscoverDevices asks every CUPS backend what it can find, calling fn once per
+// device, as each one is found.
+//
+// Discovery is slow by nature: the SNMP backend broadcasts across the subnet and
+// waits out its own timeout, so the whole operation takes seconds. Measured
+// against the development environment, cupsd answers the fast backends in 30ms
+// and then trickles the rest out over the following two and a half seconds. A
+// user interface that waited for the complete list would show a spinner for
+// three seconds and then everything at once, which reads as broken.
+//
+// fn is called from this goroutine, in arrival order, and must not block.
+//
+// A zero timeout lets CUPS choose its own.
+func (c *Client) DiscoverDevices(ctx context.Context, timeout time.Duration, fn func(Device)) error {
+	resp, err := c.send(ctx, "/", c.devicesRequest(timeout), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var (
+		buf     bytes.Buffer
+		emitted int
+		chunk   = make([]byte, 4096)
+	)
+
+	for {
+		n, readErr := resp.Body.Read(chunk)
+		if n > 0 {
+			buf.Write(chunk[:n])
+			if msg, ok := decodePrefix(buf.Bytes()); ok {
+				// Withhold the last group. A group is only known to be complete
+				// once another one begins, and emitting it early would deliver
+				// the same device twice with different contents.
+				for emitted < len(msg.Groups)-1 {
+					emit(msg.Groups[emitted], fn)
+					emitted++
+				}
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("ipp: reading device stream: %w", readErr)
+		}
+	}
+
+	final := &goipp.Message{}
+	if err := final.DecodeBytes(buf.Bytes()); err != nil {
+		return fmt.Errorf("ipp: decoding device stream: %w", err)
+	}
+	if err := check(goipp.OpCupsGetDevices, final); err != nil {
+		return err
+	}
+	for ; emitted < len(final.Groups); emitted++ {
+		emit(final.Groups[emitted], fn)
+	}
+	return nil
+}
+
+// Devices is DiscoverDevices collected into a slice, for callers that genuinely
+// want the complete list and can afford to wait for it.
+func (c *Client) Devices(ctx context.Context, timeout time.Duration) ([]Device, error) {
+	var devices []Device
+	err := c.DiscoverDevices(ctx, timeout, func(d Device) {
+		devices = append(devices, d)
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := check(goipp.OpCupsGetDevices, resp); err != nil {
-		return nil, err
+	return devices, nil
+}
+
+// decodePrefix decodes however much of a message has arrived so far.
+//
+// The trick is in the wire format. An IPP message is a fixed header followed by
+// attribute groups and terminated by a single end-of-attributes byte, so any
+// prefix of a message plus that byte is itself a valid, shorter message.
+// Appending it to whatever has arrived yields every group received so far.
+//
+// goipp has no incremental decoder, and hand-writing one would mean
+// reimplementing IPP attribute parsing, collections included, to gain nothing:
+// discovery responses run to a couple of kilobytes, so re-decoding the buffer on
+// each read costs nothing measurable.
+//
+// A read that lands mid-attribute simply fails to decode, and the next read
+// fixes it. That is why the failure case is a bool rather than an error.
+func decodePrefix(data []byte) (*goipp.Message, bool) {
+	// Eight bytes of header, plus at least one delimiter, or there is nothing
+	// worth attempting.
+	if len(data) < 9 {
+		return nil, false
 	}
 
-	var devices []Device
-	for _, g := range resp.Groups {
-		if g.Tag != goipp.TagPrinterGroup {
-			continue
-		}
-		if d, ok := parseDevice(g.Attrs); ok {
-			devices = append(devices, d)
-		}
+	probe := make([]byte, len(data)+1)
+	copy(probe, data)
+	probe[len(data)] = endOfAttributes
+
+	msg := &goipp.Message{}
+	if err := msg.DecodeBytes(probe); err != nil {
+		return nil, false
 	}
-	return devices, nil
+	return msg, true
+}
+
+func emit(g goipp.Group, fn func(Device)) {
+	if g.Tag != goipp.TagPrinterGroup {
+		return
+	}
+	if d, ok := parseDevice(g.Attrs); ok {
+		fn(d)
+	}
 }
 
 func parseDevice(attrs goipp.Attributes) (Device, bool) {

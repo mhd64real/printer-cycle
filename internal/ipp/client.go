@@ -135,6 +135,26 @@ func (c *Client) RootURI() string {
 // operation failed: IPP reports that as a status code on the returned message,
 // which the caller is responsible for checking.
 func (c *Client) Do(ctx context.Context, path string, req *goipp.Message, body io.Reader) (*goipp.Message, error) {
+	resp, err := c.send(ctx, path, req, body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	msg := &goipp.Message{}
+	if err := msg.Decode(resp.Body); err != nil {
+		return nil, fmt.Errorf("ipp: decoding response: %w", err)
+	}
+	return msg, nil
+}
+
+// send performs the exchange and hands back the undecoded response body.
+//
+// Do covers almost every caller. This exists for the one that cannot wait for a
+// complete message: CUPS streams CUPS-Get-Devices, sending each device as a
+// backend finds it, and decoding only at the end would throw away the entire
+// point of that. The caller owns closing the body.
+func (c *Client) send(ctx context.Context, path string, req *goipp.Message, body io.Reader) (*http.Response, error) {
 	var head bytes.Buffer
 	if err := req.Encode(&head); err != nil {
 		return nil, fmt.Errorf("ipp: encoding request: %w", err)
@@ -158,15 +178,9 @@ func (c *Client) Do(ctx context.Context, path string, req *goipp.Message, body i
 	if err != nil {
 		return nil, fmt.Errorf("ipp: sending request: %w", err)
 	}
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("ipp: server returned HTTP %s", resp.Status)
 	}
-
-	msg := &goipp.Message{}
-	if err := msg.Decode(resp.Body); err != nil {
-		return nil, fmt.Errorf("ipp: decoding response: %w", err)
-	}
-	return msg, nil
+	return resp, nil
 }

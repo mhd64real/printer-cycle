@@ -288,7 +288,40 @@ dnssd  class=network  uri=dnssd://Virtual%20Office%20Printer._printer._tcp.local
   timeout expires.
 - **Done when:** results arrive on a Go channel over several seconds rather than all at once at the
   end.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+
+**Measured first, before writing anything.** A throwaway experiment confirmed cupsd really does
+stream `CUPS-Get-Devices`, chunked, rather than buffering it:
+
+```
+headers at 30ms, transfer-encoding=chunked, content-length=-1
+t=30ms    1401 bytes   (the fast backends, all at once)
+t=1.55s    286 bytes
+t=2.06s    242 bytes
+t=2.56s    200 bytes   then EOF
+```
+
+Had it turned out otherwise, this stage would have been impossible and the plan would have had to
+change instead. Worth doing, since the whole stage rested on that assumption.
+
+- **goipp has no incremental decoder**, and hand-writing an IPP parser would mean reimplementing
+  attribute decoding including collections. Solved with the wire format instead: an IPP message is a
+  header, then attribute groups, then a single end-of-attributes byte, so **any prefix plus that byte
+  is a valid shorter message**. Appending it to whatever has arrived yields every group so far.
+  Discovery responses are a couple of kilobytes, so re-decoding on each read costs nothing. A read
+  landing mid-attribute simply fails to decode and the next read fixes it.
+- **The last group is always withheld.** A group is only known complete once the next one begins, so
+  emitting it early would deliver the same device twice with different contents. **Consequence worth
+  remembering at Stage 46:** a device appears to the user when the *next* device is found, and the
+  final one only when discovery ends. That is inherent, not a defect, but the pairing screen should
+  not imply the list is settled before the call returns.
+- **Deviation from the plan, deliberate: a callback, not a channel.** `DiscoverDevices(ctx, timeout,
+  func(Device))`. A channel needs either an arbitrary buffer or a goroutine the caller must fully
+  drain or leak, and it needs a second channel for the error. A callback has no lifetime question,
+  returns errors normally, and maps one-to-one onto the `printer.discovered` notification Stage 32
+  sends. `Devices` is now a thin collector over it, so there is one implementation rather than two.
+- `Do` was split into `send` plus decode, so one caller can read the body progressively while every
+  other keeps the simple path.
 
 ### Stage 15: PPD listing with device-id filter
 - `CUPS-Get-PPDs`, both the full list and filtered by `ppd-device-id`.
@@ -731,3 +764,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   scheme, and the `snmp` value it previously allowed does not exist. The spec was wrong in a way only
   implementation could reveal, which is the argument for building the IPP layer before the protocol
   server rather than after it.
+- **2026-08-30, after Stage 14:** streaming discovery delivers via callback rather than the channel
+  the plan named, for goroutine-lifetime and error-handling reasons recorded in the stage. Noted
+  against Stage 46 that a discovered device surfaces only when the next one is found, which the
+  pairing UI has to account for rather than implying the list is complete early.

@@ -1,6 +1,8 @@
 package ipp
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/OpenPrinting/goipp"
@@ -81,5 +83,55 @@ func TestRequestedAttributesCarriesEveryName(t *testing.T) {
 	}
 	if attr.Values[0].T != goipp.TagKeyword {
 		t.Errorf("tag = %v, want keyword", attr.Values[0].T)
+	}
+}
+
+// RFC 8011 makes success a range, not a single value. Several codes in it are
+// successes with a caveat: attributes ignored, values substituted, subscriptions
+// dropped. Treating those as failures would reject perfectly good print jobs for
+// cosmetic reasons, which is exactly what makes a print server feel broken.
+func TestCheckTreatsTheWholeSuccessRangeAsSuccess(t *testing.T) {
+	successes := []goipp.Status{
+		goipp.StatusOk,
+		goipp.StatusOkIgnoredOrSubstituted,
+		goipp.StatusOkConflicting,
+		goipp.StatusOkIgnoredSubscriptions,
+		goipp.StatusOkEventsComplete,
+	}
+	for _, status := range successes {
+		resp := goipp.NewResponse(goipp.DefaultVersion, status, 1)
+		if err := check(goipp.OpCupsGetPrinters, resp); err != nil {
+			t.Errorf("check(%s) = %v, want nil", status, err)
+		}
+	}
+
+	resp := goipp.NewResponse(goipp.DefaultVersion, goipp.StatusErrorNotFound, 1)
+	if err := check(goipp.OpCupsGetPrinters, resp); err == nil {
+		t.Error("check(not-found) returned nil, want an error")
+	}
+}
+
+// CUPS usually sends a status-message that is more specific than the code.
+// Losing it would mean throwing away the most useful half of the diagnosis.
+func TestCheckCarriesTheServerMessage(t *testing.T) {
+	const msg = "The printer or class does not exist."
+
+	resp := goipp.NewResponse(goipp.DefaultVersion, goipp.StatusErrorNotFound, 1)
+	resp.Operation.Add(goipp.MakeAttribute("status-message", goipp.TagText, goipp.String(msg)))
+
+	err := check(goipp.OpGetPrinterAttributes, resp)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+
+	var ippErr *Error
+	if !errors.As(err, &ippErr) {
+		t.Fatalf("err is %T, want *ipp.Error", err)
+	}
+	if ippErr.Message != msg {
+		t.Errorf("Message = %q, want %q", ippErr.Message, msg)
+	}
+	if !strings.Contains(err.Error(), msg) {
+		t.Errorf("Error() = %q, should include the server message", err.Error())
 	}
 }

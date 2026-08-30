@@ -2,7 +2,9 @@ package ipp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
 
 	"github.com/OpenPrinting/goipp"
 )
@@ -89,16 +91,13 @@ func (c *Client) Printers(ctx context.Context) ([]Printer, error) {
 		return nil, err
 	}
 
-	switch status := goipp.Status(resp.Code); status {
-	case goipp.StatusOk:
-		// carry on
-	case goipp.StatusErrorNotFound:
-		// CUPS answers a server with no queues with not-found rather than an
-		// empty list. To a caller that is not an error, it is zero printers.
-		return nil, nil
-	default:
-		// Stage 12 replaces this with typed errors.
-		return nil, fmt.Errorf("ipp: CUPS-Get-Printers: %s", status)
+	if err := check(goipp.OpCupsGetPrinters, resp); err != nil {
+		// CUPS answers a server with no queues with not-found rather than with
+		// an empty list. To a caller that is zero printers, not a failure.
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
 
 	// One Printer group per queue. The named per-group fields on Message would
@@ -165,4 +164,38 @@ func parseMarkers(attrs goipp.Attributes) []Marker {
 		markers[i] = m
 	}
 	return markers
+}
+
+// Printer returns one queue by name.
+//
+// A queue that does not exist yields an error satisfying errors.Is(err,
+// ErrNotFound), so callers branch on meaning rather than on message text.
+func (c *Client) Printer(ctx context.Context, name string) (Printer, error) {
+	req := c.NewRequest(goipp.OpGetPrinterAttributes)
+	req.Operation.Add(goipp.MakeAttribute("printer-uri", goipp.TagURI, goipp.String(c.PrinterURI(name))))
+	req.Operation.Add(requestedAttributes(printerFields...))
+
+	resp, err := c.Do(ctx, "/printers/"+url.PathEscape(name), req, nil)
+	if err != nil {
+		return Printer{}, err
+	}
+	if err := check(goipp.OpGetPrinterAttributes, resp); err != nil {
+		return Printer{}, err
+	}
+
+	for _, g := range resp.Groups {
+		if g.Tag == goipp.TagPrinterGroup {
+			if p := parsePrinter(g.Attrs); p.Name != "" {
+				return p, nil
+			}
+		}
+	}
+
+	// A success carrying no printer group should not happen, but answering with
+	// an empty struct and a nil error would be worse than saying so.
+	return Printer{}, &Error{
+		Op:      goipp.OpGetPrinterAttributes,
+		Status:  goipp.StatusErrorNotFound,
+		Message: fmt.Sprintf("no printer group in the response for %q", name),
+	}
 }

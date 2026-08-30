@@ -229,7 +229,25 @@ file-pcl  state=idle  model="Generic PCL Laser Printer"   device=file:///var/spo
   section 3.
 - **Done when:** asking for a printer that does not exist yields a typed not-found error, not a
   string.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Proof:**
+
+```
+typed error: ipp: Get-Printer-Attributes: client-error-not-found: The printer or class does not exist.
+```
+
+  and it satisfies `errors.Is(err, ipp.ErrNotFound)`, so callers branch on meaning rather than on
+  message text.
+- Two distinct kinds of failure are now distinguishable, which they were not before. A transport
+  failure means the exchange never happened. An `*ipp.Error` means it worked perfectly and CUPS said
+  no. Retry logic and user-facing messages need opposite things from those two.
+- Success is a **range test**, not a list: RFC 8011 puts every code below 0x0100 in the successful
+  family, and several of them are successes with a caveat (attributes ignored, values substituted).
+  Treating those as failures would reject perfectly good print jobs for cosmetic reasons.
+- CUPS's `status-message` is captured, because it is consistently more specific than the status code.
+- Also added `Printer(ctx, name)` for single-queue lookup, which is what makes the missing-printer
+  case testable at all.
+- **The JSON-RPC mapping was deliberately NOT done here.** See the Stage 31 note for why.
 
 ### Stage 13: Discovery, CUPS-Get-Devices
 - Call it with a timeout, decode the device list, expose device URI, device ID, make and model, and
@@ -348,10 +366,16 @@ file-pcl  state=idle  model="Generic PCL Laser Printer"   device=file:///var/spo
 - **Done when:** a connector's declared settings survive a core restart.
 - **Status:** todo
 
-### Stage 31: Scope enforcement
+### Stage 31: Scope enforcement and IPP error translation
 - One middleware, deny by default, correct JSON-RPC error on refusal.
+- **Moved here from Stage 12, with a reason.** Translating `internal/ipp` errors into the JSON-RPC
+  codes in PROTOCOL.md section 3 cannot be done inside the IPP package, because it is impossible from
+  a status code alone: IPP answers a missing printer and a missing job with the same not-found, while
+  the protocol distinguishes -32003 (unknown printer) from -32004 (unknown job). Only the caller
+  knows which it asked for. The translation belongs at this boundary, where that context exists. The
+  intended correspondence is recorded in the doc comment on `internal/ipp/errors.go`.
 - **Done when:** a connector holding only `jobs.submit` is refused `printers.manage` with code
-  -32001.
+  -32001, and an IPP not-found from a printer operation reaches the connector as -32003.
 - **Status:** todo
 
 ### Stage 32: printers.discover and printer.discovered
@@ -675,3 +699,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   named per-group fields on Message would have flattened a multi-printer response into a single
   merged printer, so group walking is mandatory for anything that returns more than one of a thing.
   That applies to Stage 13 (devices), Stage 15 (PPDs) and Stage 18 (jobs) as well.
+- **2026-08-30, after Stage 12:** the IPP-to-JSON-RPC error mapping moved from Stage 12 to Stage 31.
+  It cannot be done from a status code alone, because IPP reports a missing printer and a missing job
+  identically while the protocol gives them different codes. Only the calling layer knows which was
+  asked for. Stage 12 delivered the typed errors that mapping will consume, and the intended
+  correspondence is written down in `internal/ipp/errors.go` so it does not get lost in the gap.

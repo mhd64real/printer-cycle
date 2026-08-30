@@ -2,6 +2,7 @@ package ipp_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -182,4 +183,77 @@ func TestPrintersAgainstCUPS(t *testing.T) {
 		t.Logf("%-9s state=%-10s model=%-28q device=%s",
 			p.Name, p.State, p.MakeAndModel, p.DeviceURI)
 	}
+}
+
+func TestStatusesMapToSentinels(t *testing.T) {
+	cases := []struct {
+		status goipp.Status
+		want   error
+	}{
+		{goipp.StatusErrorNotFound, ipp.ErrNotFound},
+		{goipp.StatusErrorForbidden, ipp.ErrForbidden},
+		{goipp.StatusErrorNotAuthenticated, ipp.ErrNotAuthenticated},
+		{goipp.StatusErrorDocumentFormatNotSupported, ipp.ErrFormatUnsupported},
+		{goipp.StatusErrorConflicting, ipp.ErrConflict},
+		// Anything from 0x0500 up is the server's problem rather than the
+		// request's, and is the category worth retrying.
+		{goipp.Status(0x0501), ipp.ErrServer},
+		{goipp.Status(0x050b), ipp.ErrServer},
+	}
+
+	for _, tc := range cases {
+		err := &ipp.Error{Op: goipp.OpCupsGetPrinters, Status: tc.status}
+		if !errors.Is(err, tc.want) {
+			t.Errorf("status %s does not satisfy errors.Is for %v", tc.status, tc.want)
+		}
+	}
+
+	// A status with no sentinel must not accidentally match one.
+	odd := &ipp.Error{Status: goipp.Status(0x0499)}
+	if errors.Is(odd, ipp.ErrNotFound) {
+		t.Error("an unmapped status matched ErrNotFound")
+	}
+}
+
+// TestMissingPrinterIsTypedNotFound is the point of this stage: a queue that
+// does not exist has to come back as a value callers can branch on, not as a
+// string they have to match against.
+func TestMissingPrinterIsTypedNotFound(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	_, err := c.Printer(ctx, "this-queue-does-not-exist")
+	if err == nil {
+		t.Fatal("Printer on a missing queue returned no error")
+	}
+	if !errors.Is(err, ipp.ErrNotFound) {
+		t.Fatalf("err = %v, want it to satisfy errors.Is(err, ipp.ErrNotFound)", err)
+	}
+
+	status, ok := ipp.StatusOf(err)
+	if !ok {
+		t.Error("StatusOf found no IPP status on the error")
+	}
+	t.Logf("typed error: %v (status %s)", err, status)
+}
+
+func TestPrinterByNameAgainstCUPS(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	p, err := c.Printer(ctx, "file-ps")
+	if err != nil {
+		t.Fatalf("Printer(file-ps): %v. Run: make dev-printers", err)
+	}
+	if p.Name != "file-ps" {
+		t.Errorf("Name = %q, want file-ps", p.Name)
+	}
+	if p.State != ipp.PrinterStateIdle {
+		t.Errorf("State = %s, want idle", p.State)
+	}
+	t.Logf("%s: %s, %s", p.Name, p.MakeAndModel, p.State)
 }

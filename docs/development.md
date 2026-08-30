@@ -83,6 +83,14 @@ lpadmin: Printer drivers are deprecated and will stop working in a future versio
 Debian trixie ships CUPS 2.4.10, where drivers are deprecated but fully working, and CUPS 3.0 is not
 in the distribution. See PLAN.md for where that risk currently stands.
 
+**Job privacy is switched off in the container, to match production.** CUPS hides `job-name` and
+`job-originating-user-name` from any client it does not consider the job's owner or a system user,
+returning them empty rather than refusing the request. In production core connects over the Unix
+socket as a member of `lpadmin`, which CUPS treats as a system user, so it sees the real values. This
+container has no authentication at all, so `JobPrivateAccess all` and `JobPrivateValues none` in
+`dev/cupsd.conf` reproduce what production sees. Without them, job listings come back with blank
+names and the cause is not remotely obvious.
+
 **SNMP discovery cannot be tested here.** The DNS-SD path works, via the virtual printer. SNMP is the
 path that finds old network laser printers, which is exactly the hardware this project targets, and
 faking it needs either real hardware or a simulated SNMP printer agent. It stays unverified until

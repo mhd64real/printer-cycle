@@ -665,9 +665,8 @@ func TestPrintJobThroughTheFilterChain(t *testing.T) {
 // Pi Zero 2 W sharing 512MB between the OS, cupsd and Ghostscript gets an
 // out-of-memory kill the first time somebody prints a large scan.
 //
-// This measures the client, which is what this package is responsible for. That
-// every byte actually reached CUPS is verified in Stage 18, where
-// Get-Job-Attributes exposes job-k-octets.
+// It also confirms every byte arrived, by reading job-k-octets back from CUPS.
+// The Print-Job response does not carry that, so it needs a second query.
 func TestPrintJobStreamsWithoutBuffering(t *testing.T) {
 	c := integrationClient(t)
 	queue, _ := scratchQueue(t, c, "pc-test-stream", "drv:///sample.drv/generic.ppd")
@@ -675,13 +674,19 @@ func TestPrintJobStreamsWithoutBuffering(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
+	// Pause the queue first. CUPS still accepts the whole document, which is
+	// what is being measured, but never spends CPU rasterising 32MB of it. An
+	// earlier version of this test left Ghostscript grinding away after the
+	// test returned and starved a later test into timing out.
+	if err := c.PausePrinter(ctx, queue); err != nil {
+		t.Fatalf("PausePrinter: %v", err)
+	}
+
 	const size = 32 << 20
 
-	// A valid PostScript document padded to 32MB with comment lines. Comments
-	// are cheap for Ghostscript to skip, so the container is not asked to
-	// rasterise a hundred thousand pages just to prove a point about memory.
-	// Generated as it is read: the full document never exists anywhere, so if
-	// the heap grows to its size, this code is what put it there.
+	// A valid PostScript document padded to 32MB with comment lines, generated
+	// as it is read. The full document never exists anywhere, so if the heap
+	// grows to its size, this code is what put it there.
 	doc := io.LimitReader(io.MultiReader(
 		strings.NewReader("%!PS-Adobe-3.0\n%%Pages: 1\n"),
 		paddingReader{},
@@ -721,6 +726,11 @@ func TestPrintJobStreamsWithoutBuffering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrintJob: %v", err)
 	}
+	t.Cleanup(func() {
+		cctx, ccancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer ccancel()
+		_ = c.CancelJob(cctx, job.ID)
+	})
 
 	growth := int64(peak) - int64(base.HeapAlloc)
 	const budget = 16 << 20
@@ -730,6 +740,18 @@ func TestPrintJobStreamsWithoutBuffering(t *testing.T) {
 	if growth > budget {
 		t.Errorf("heap grew %.1f MB while sending a %d MB document: it is being buffered, not streamed",
 			float64(growth)/(1<<20), size>>20)
+	}
+
+	// Small heap use would also be consistent with the document never having
+	// been sent, so confirm CUPS actually received all of it.
+	stored, err := c.Job(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("reading the job back: %v", err)
+	}
+	t.Logf("CUPS accounted for %.1f MB of the %d MB sent", float64(stored.SizeBytes)/(1<<20), size>>20)
+
+	if stored.SizeBytes < size {
+		t.Errorf("CUPS received %d bytes, %d were sent: the stream was truncated", stored.SizeBytes, size)
 	}
 }
 
@@ -742,4 +764,130 @@ func (paddingReader) Read(b []byte) (int, error) {
 		b[i] = line[i%len(line)]
 	}
 	return len(b), nil
+}
+
+// TestJobLifecycleAgainstCUPS covers reading a job back, finding it in a
+// listing, and cancelling it.
+//
+// The queue is paused throughout, so the job stays put instead of racing to
+// completion and making the cancel meaningless.
+func TestJobLifecycleAgainstCUPS(t *testing.T) {
+	c := integrationClient(t)
+	queue, _ := scratchQueue(t, c, "pc-test-jobs", "drv:///sample.drv/generic.ppd")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := c.PausePrinter(ctx, queue); err != nil {
+		t.Fatalf("PausePrinter: %v", err)
+	}
+
+	submitted, err := c.PrintJob(ctx, queue, strings.NewReader("a job to cancel\n"), ipp.PrintOptions{
+		JobName: "cancel me",
+		Format:  "text/plain",
+		User:    "test-user",
+	})
+	if err != nil {
+		t.Fatalf("PrintJob: %v", err)
+	}
+
+	got, err := c.Job(ctx, submitted.ID)
+	if err != nil {
+		t.Fatalf("Job: %v", err)
+	}
+	if got.ID != submitted.ID {
+		t.Errorf("id = %d, want %d", got.ID, submitted.ID)
+	}
+	if got.Name != "cancel me" {
+		t.Errorf("Name = %q, want the job name to survive", got.Name)
+	}
+	if got.User != "test-user" {
+		t.Errorf("User = %q, want test-user: job ownership drives who may see it", got.User)
+	}
+	if got.Printer != queue {
+		t.Errorf("Printer = %q, want %q", got.Printer, queue)
+	}
+	if got.State.Terminal() {
+		t.Errorf("state is already %s on a paused queue", got.State)
+	}
+	t.Logf("job %d: %q for %s on %s, state %s", got.ID, got.Name, got.User, got.Printer, got.State)
+
+	pending, err := c.Jobs(ctx, queue, ipp.JobsNotCompleted, 0)
+	if err != nil {
+		t.Fatalf("Jobs: %v", err)
+	}
+	var listed bool
+	for _, j := range pending {
+		if j.ID == submitted.ID {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Errorf("job %d is not in the queue listing of %d jobs", submitted.ID, len(pending))
+	}
+
+	if err := c.CancelJob(ctx, submitted.ID); err != nil {
+		t.Fatalf("CancelJob: %v", err)
+	}
+
+	after, err := c.Job(ctx, submitted.ID)
+	if err != nil {
+		t.Fatalf("reading the job after cancelling: %v", err)
+	}
+	if after.State != ipp.JobCanceled {
+		t.Errorf("state = %s after cancelling, want cancelled", after.State)
+	}
+	if !after.State.Terminal() {
+		t.Error("a cancelled job must report as terminal so watchers stop watching")
+	}
+}
+
+func TestUnknownJobIsTypedNotFound(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := c.Job(ctx, 999999)
+	if err == nil {
+		t.Fatal("reading a job that does not exist returned no error")
+	}
+	if !errors.Is(err, ipp.ErrNotFound) {
+		t.Errorf("err = %v, want it to satisfy errors.Is(err, ipp.ErrNotFound)", err)
+	}
+}
+
+func TestPauseAndResumeAgainstCUPS(t *testing.T) {
+	c := integrationClient(t)
+	queue, _ := scratchQueue(t, c, "pc-test-pause", "drv:///sample.drv/generic.ppd")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if err := c.PausePrinter(ctx, queue); err != nil {
+		t.Fatalf("PausePrinter: %v", err)
+	}
+	paused, err := c.Printer(ctx, queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paused.State != ipp.PrinterStateStopped {
+		t.Errorf("state = %s after pausing, want stopped", paused.State)
+	}
+	// A paused queue must keep accepting jobs, or pausing would mean losing
+	// everything printed while it was paused.
+	if !paused.AcceptingJobs {
+		t.Error("a paused queue stopped accepting jobs, so work submitted while paused would be lost")
+	}
+
+	if err := c.ResumePrinter(ctx, queue); err != nil {
+		t.Fatalf("ResumePrinter: %v", err)
+	}
+	resumed, err := c.Printer(ctx, queue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.State != ipp.PrinterStateIdle {
+		t.Errorf("state = %s after resuming, want idle", resumed.State)
+	}
 }

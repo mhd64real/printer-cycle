@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 
 	"github.com/OpenPrinting/goipp"
 )
@@ -57,6 +58,7 @@ type Job struct {
 	Printer      string
 	User         string
 	State        JobState
+	StateMessage string
 	StateReasons []string
 	PagesTotal   int
 	PagesDone    int
@@ -176,17 +178,187 @@ func parseJob(attrs goipp.Attributes) Job {
 	state, _ := integer(attrs, "job-state")
 	total, _ := integer(attrs, "job-impressions")
 	done, _ := integer(attrs, "job-impressions-completed")
-	size, _ := integer(attrs, "job-k-octets")
+	kOctets, _ := integer(attrs, "job-k-octets")
 
-	return Job{
+	job := Job{
 		ID:           int(id),
 		URI:          str(attrs, "job-uri"),
 		Name:         str(attrs, "job-name"),
 		User:         str(attrs, "job-originating-user-name"),
 		State:        JobState(state),
+		StateMessage: str(attrs, "job-state-message"),
 		StateReasons: strs(attrs, "job-state-reasons"),
 		PagesTotal:   int(total),
 		PagesDone:    int(done),
-		SizeBytes:    int(size) * 1024,
+
+		// job-k-octets counts kibibytes, rounded up, per RFC 8011.
+		SizeBytes: int(kOctets) * 1024,
 	}
+
+	// CUPS reports the owning queue as a URI. The last path element is the
+	// queue name, which is what everything above this layer works in.
+	if uri := str(attrs, "job-printer-uri"); uri != "" {
+		if i := strings.LastIndex(uri, "/"); i >= 0 && i+1 < len(uri) {
+			if name, err := url.PathUnescape(uri[i+1:]); err == nil {
+				job.Printer = name
+			}
+		}
+	}
+	return job
+}
+
+// jobFields is what we ask CUPS for about a job.
+var jobFields = []string{
+	"job-id",
+	"job-uri",
+	"job-name",
+	"job-state",
+	"job-state-message",
+	"job-state-reasons",
+	"job-originating-user-name",
+	"job-printer-uri",
+	"job-k-octets",
+	"job-impressions",
+	"job-impressions-completed",
+}
+
+// JobURI builds the URI CUPS uses to address one job.
+func (c *Client) JobURI(id int) string {
+	return fmt.Sprintf("ipp://%s/jobs/%d", c.authority, id)
+}
+
+// Job reads one job back.
+//
+// A job id that does not exist yields an error satisfying errors.Is(err,
+// ErrNotFound). Note that CUPS forgets completed jobs after a while, so an id
+// that was valid an hour ago may legitimately be gone.
+func (c *Client) Job(ctx context.Context, id int) (Job, error) {
+	req := c.NewRequest(goipp.OpGetJobAttributes)
+	req.Operation.Add(goipp.MakeAttribute("job-uri", goipp.TagURI, goipp.String(c.JobURI(id))))
+	req.Operation.Add(requestedAttributes(jobFields...))
+
+	resp, err := c.Do(ctx, fmt.Sprintf("/jobs/%d", id), req, nil)
+	if err != nil {
+		return Job{}, err
+	}
+	if err := check(goipp.OpGetJobAttributes, resp); err != nil {
+		return Job{}, err
+	}
+
+	for _, g := range resp.Groups {
+		if g.Tag == goipp.TagJobGroup {
+			if job := parseJob(g.Attrs); job.ID != 0 {
+				return job, nil
+			}
+		}
+	}
+	return Job{}, &Error{
+		Op:      goipp.OpGetJobAttributes,
+		Status:  goipp.StatusErrorNotFound,
+		Message: fmt.Sprintf("no job group in the response for job %d", id),
+	}
+}
+
+// JobScope selects which jobs [Client.Jobs] returns.
+type JobScope string
+
+const (
+	JobsNotCompleted JobScope = "not-completed"
+	JobsCompleted    JobScope = "completed"
+	JobsAll          JobScope = "all"
+)
+
+// Jobs lists jobs on a queue, or across every queue when printer is empty.
+//
+// CUPS keeps completed jobs only for a while and then forgets them, so this is a
+// view of recent history rather than a permanent record. printer-cycle keeps its
+// own job records for anything that has to outlive that.
+func (c *Client) Jobs(ctx context.Context, printer string, scope JobScope, limit int) ([]Job, error) {
+	target := c.RootURI()
+	path := "/"
+	if printer != "" {
+		if err := ValidPrinterName(printer); err != nil {
+			return nil, err
+		}
+		target = c.PrinterURI(printer)
+		path = "/printers/" + url.PathEscape(printer)
+	}
+	if scope == "" {
+		scope = JobsNotCompleted
+	}
+
+	req := c.NewRequest(goipp.OpGetJobs)
+	req.Operation.Add(goipp.MakeAttribute("printer-uri", goipp.TagURI, goipp.String(target)))
+	req.Operation.Add(goipp.MakeAttribute("which-jobs", goipp.TagKeyword, goipp.String(string(scope))))
+	if limit > 0 {
+		req.Operation.Add(goipp.MakeAttribute("limit", goipp.TagInteger, goipp.Integer(int32(limit))))
+	}
+	req.Operation.Add(requestedAttributes(jobFields...))
+
+	resp, err := c.Do(ctx, path, req, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := check(goipp.OpGetJobs, resp); err != nil {
+		// No jobs is an empty list, not a failure.
+		if errorsIsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var jobs []Job
+	for _, g := range resp.Groups {
+		if g.Tag != goipp.TagJobGroup {
+			continue
+		}
+		if job := parseJob(g.Attrs); job.ID != 0 {
+			jobs = append(jobs, job)
+		}
+	}
+	return jobs, nil
+}
+
+// CancelJob cancels a job, whether it is queued or already printing.
+//
+// Cancelling a job that has already finished returns an error satisfying
+// errors.Is(err, ErrNotPossible), which callers should usually treat as success:
+// the user wanted it stopped, and it is stopped.
+func (c *Client) CancelJob(ctx context.Context, id int) error {
+	req := c.NewRequest(goipp.OpCancelJob)
+	req.Operation.Add(goipp.MakeAttribute("job-uri", goipp.TagURI, goipp.String(c.JobURI(id))))
+	req.Operation.Add(goipp.MakeAttribute("requesting-user-name", goipp.TagName, goipp.String("printer-cycle")))
+
+	resp, err := c.Do(ctx, fmt.Sprintf("/jobs/%d", id), req, nil)
+	if err != nil {
+		return err
+	}
+	return check(goipp.OpCancelJob, resp)
+}
+
+// PausePrinter stops a queue from processing jobs. Jobs already submitted stay
+// queued and print when the queue resumes; nothing is lost.
+func (c *Client) PausePrinter(ctx context.Context, name string) error {
+	return c.printerControl(ctx, goipp.OpPausePrinter, name)
+}
+
+// ResumePrinter starts a paused queue processing again.
+func (c *Client) ResumePrinter(ctx context.Context, name string) error {
+	return c.printerControl(ctx, goipp.OpResumePrinter, name)
+}
+
+func (c *Client) printerControl(ctx context.Context, op goipp.Op, name string) error {
+	if err := ValidPrinterName(name); err != nil {
+		return err
+	}
+
+	req := c.NewRequest(op)
+	req.Operation.Add(goipp.MakeAttribute("printer-uri", goipp.TagURI, goipp.String(c.PrinterURI(name))))
+	req.Operation.Add(goipp.MakeAttribute("requesting-user-name", goipp.TagName, goipp.String("printer-cycle")))
+
+	resp, err := c.Do(ctx, "/admin/", req, nil)
+	if err != nil {
+		return err
+	}
+	return check(op, resp)
 }

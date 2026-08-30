@@ -428,7 +428,32 @@ Ghostscript's own invocation line in the header.
     the suite and makes a later test time out.
 - **Done when:** a submitted job can be read back and cancelled mid-flight, and the streaming test no
   longer leaves CUPS busy.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+
+**Both carried-over items closed.** Byte accounting confirms nothing was lost:
+
+```
+job 19: sent 32 MB, peak heap growth 0.1 MB
+CUPS accounted for 32.0 MB of the 32 MB sent
+```
+
+  That second line matters more than it looks. A small heap is also consistent with the document
+  never having been sent at all, so without it the memory test proved less than it appeared to.
+
+- **Pause and resume added, which were not in the plan.** They earn their place three times over: they
+  make cancellation deterministically testable, they fix the Stage 17 flake at the source (a paused
+  queue accepts the whole 32MB but never spends CPU rasterising it), and pausing a printer is a real
+  feature the dashboard will want anyway. A test also pins that a paused queue keeps *accepting*
+  jobs, since a pause that quietly discarded work would be a data-loss bug.
+- **CUPS redacts job names, and this is a deployment requirement rather than a test problem.**
+  `job-name` and `job-originating-user-name` came back empty. The cause is CUPS's `JobPrivateValues`
+  policy: it hides those attributes from any client it does not regard as the job's owner or a system
+  user, returning them blank rather than refusing. **If core is not in the CUPS SystemGroup, every job
+  listing shows blank names, for reasons that look nothing like the real cause.** That is now a second
+  reason the installer must put core's user in `lpadmin`, alongside admin access. The dev container
+  was changed to match production rather than the test being weakened.
+- Cancelling an already-finished job returns `ErrNotPossible`, which callers should generally treat as
+  success: the user wanted it stopped and it is stopped.
 
 ### Stage 19: Subscriptions and the event loop
 - `Create-Printer-Subscription`, then a `Get-Notifications` loop with lease renewal, emitting job
@@ -704,7 +729,12 @@ Ghostscript's own invocation line in the header.
 ### Stage 59: Binaries, checksums, users, directories
 - Download and verify, create the system user, add it to `lpadmin`, create config and data
   directories with correct permissions.
-- **Done when:** core can perform a CUPS admin operation with no password anywhere.
+- **The `lpadmin` membership is required for two separate reasons**, the second found in Stage 18:
+  admin operations need it, and so does reading job metadata. CUPS's `JobPrivateValues` policy blanks
+  `job-name` and `job-originating-user-name` for any client it does not treat as owner or system
+  user, silently, so a core outside that group shows every job with no name and no owner.
+- **Done when:** core can perform a CUPS admin operation with no password anywhere, and job listings
+  come back with names and owners rather than blanks.
 - **Status:** todo
 
 ### Stage 60: Service units
@@ -893,3 +923,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   completed successfully, and prints nothing. Added format validation to Stage 35 and silent-success
   detection to Stage 37, because a print server that lies about success is worse than one that fails.
   Byte accounting and a fix for the flaky 32MB job both moved to Stage 18, where Cancel-Job lands.
+- **2026-08-30, after Stage 18:** added pause and resume, which were not planned. They make cancel
+  testable, remove the Stage 17 flake at its source, and are a feature the dashboard needs regardless.
+  Recorded against Stage 59 that CUPS silently blanks job names and owners for clients outside its
+  SystemGroup, which makes the `lpadmin` membership a correctness requirement and not only an
+  permissions one.

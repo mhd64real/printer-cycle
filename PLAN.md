@@ -740,7 +740,31 @@ it. Test asserts shutdown completes in under two seconds with a connector attach
 ### Stage 28: JSON-RPC message layer
 - Encode and decode, request and response correlation by id, notifications, both directions.
 - **Done when:** core can call a connected client and receive its reply.
-- **Status:** todo
+- **Status:** done, 2026-08-31. `internal/jsonrpc`, everything under `-race`.
+- **Both peers are equals.** A test has each side call the other, because that is the requirement
+  that ruled out plain request-and-response when the protocol was chosen: a finished print job has to
+  reach the connector that submitted it without the connector asking.
+- **Kept in its own package, with no WebSocket anywhere near it.** The tests wire two peers together
+  through in-memory channels, so a correlation bug cannot hide behind a network.
+- **Correlation is tested where it actually breaks:** twenty overlapping calls whose handlers finish
+  in reverse order, so every reply arrives out of sequence. A test with one call at a time would pass
+  against an implementation that simply returned the next response to arrive.
+- **Unexpected errors are opaque to the peer.** An error from inside core may name a file path, a
+  query, or a table, and a connector on the network has no business seeing any of it. Handlers
+  returning a `*jsonrpc.Error` control the code deliberately; anything else becomes a bare internal
+  error, with the detail left for the log.
+- **A malformed frame does not end the connection.** One bad message from a buggy connector should
+  not take down a working conversation, so it draws a parse error with a null id and the connection
+  carries on. Tested by sending garbage and then a valid request over the same socket.
+- **Pending calls are woken when the connection dies**, rather than hanging for the lifetime of the
+  process.
+- **Writes are serialised**, which is what makes the protocol's promise that job updates arrive in
+  order actually true rather than aspirational.
+- Wired into the WebSocket, with binary frames routed away from the message layer entirely: documents
+  never travel inside JSON, since base64 inflates by a third and forces the whole file into memory.
+  Until Stage 35 a binary frame is logged and ignored rather than dropping the connection.
+- Every method is refused with `-32002` until Stage 29 adds authentication. Refusing by default means
+  a method added later without a permission check fails closed.
 
 ### Stage 29: Handshake
 - `hello` with nonce, `authenticate`, granted scopes returned.
@@ -1184,3 +1208,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   in a test, since the raw failure is "invalid argument" and explains nothing. Recorded the shutdown
   investigation in full: two plausible fixes made no difference before instrumenting showed the real
   cause, and `CloseNow` as a fallback for a stuck `Close` does not work at all.
+- **2026-08-31, after Stage 28:** no structural change. The message layer lives in `internal/jsonrpc`
+  with no transport dependency, which is what let the correlation and lifetime behaviour be tested
+  without a socket in the way.

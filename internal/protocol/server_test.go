@@ -17,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/mhd64real/printer-cycle/internal/connauth"
+	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 	"github.com/mhd64real/printer-cycle/internal/protocol"
 	"github.com/mhd64real/printer-cycle/internal/store"
 )
@@ -251,5 +252,91 @@ func TestOverlongSocketPathIsRefusedClearly(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "limit") {
 		t.Errorf("error does not explain the length limit: %v", err)
+	}
+}
+
+// The message layer is genuinely wired to the socket, not merely present
+// alongside it: a request over the WebSocket gets a JSON-RPC response.
+func TestJSONRPCRunsOverTheWebSocket(t *testing.T) {
+	s, _ := newServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+protocol.ConnectorPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close(websocket.StatusNormalClosure, "")
+
+	readHello(t, ctx, ws)
+
+	req := `{"jsonrpc":"2.0","id":1,"method":"printers.list","params":{}}`
+	if err := ws.Write(ctx, websocket.MessageText, []byte(req)); err != nil {
+		t.Fatal(err)
+	}
+
+	_, data, err := ws.Read(ctx)
+	if err != nil {
+		t.Fatalf("no response to a request: %v", err)
+	}
+
+	var resp struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Error   *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatalf("response is not JSON: %v (%s)", err, data)
+	}
+
+	if resp.JSONRPC != "2.0" || resp.ID != 1 {
+		t.Errorf("response = %s, want jsonrpc 2.0 and the request id back", data)
+	}
+	// Everything is refused until Stage 29 adds authentication, and refusing by
+	// default is the point: a method added later without a permission check
+	// fails closed rather than open.
+	if resp.Error == nil || resp.Error.Code != jsonrpc.CodeNotAuthenticated {
+		t.Errorf("response = %s, want a not-authenticated error", data)
+	}
+}
+
+// A binary frame arriving before document streaming exists must not take the
+// connection down. Connectors are written by other people and will do
+// unexpected things.
+func TestABinaryFrameDoesNotKillTheConnection(t *testing.T) {
+	s, _ := newServer(t)
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+protocol.ConnectorPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close(websocket.StatusNormalClosure, "")
+
+	readHello(t, ctx, ws)
+
+	if err := ws.Write(ctx, websocket.MessageBinary, []byte{0, 0, 0, 1, 0xAA}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.Write(ctx, websocket.MessageText, []byte(`{"jsonrpc":"2.0","id":2,"method":"anything"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	_, data, err := ws.Read(ctx)
+	if err != nil {
+		t.Fatalf("the connection died after a binary frame: %v", err)
+	}
+	if !strings.Contains(string(data), `"id":2`) {
+		t.Errorf("response = %s, want the answer to the request that followed", data)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/mhd64real/printer-cycle/internal/connauth"
+	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 	"github.com/mhd64real/printer-cycle/internal/store"
 	"github.com/mhd64real/printer-cycle/internal/version"
 )
@@ -200,6 +201,7 @@ func isUnixPath(addr string) bool {
 // conn is one connector connection.
 type conn struct {
 	ws        *websocket.Conn
+	rpc       *jsonrpc.Conn
 	challenge *connauth.Challenge
 	log       *slog.Logger
 }
@@ -234,20 +236,62 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	c.rpc = jsonrpc.New(&wsTransport{ws: ws, log: c.log}, c)
+
 	if err := c.sendHello(ctx); err != nil {
 		c.log.Warn("cannot greet connector", "error", err)
 		ws.Close(websocket.StatusInternalError, "internal error")
 		return
 	}
 
-	// Reading and dispatching messages arrives in Stage 28. Until then the
-	// connection is held open so a client can observe the greeting, and closed
-	// when the client goes away.
-	for {
-		if _, _, err := ws.Read(ctx); err != nil {
-			return
-		}
+	if err := c.rpc.Serve(ctx); err != nil {
+		c.log.Debug("connector disconnected", "error", err)
 	}
+}
+
+// Handle dispatches an incoming request from a connector.
+//
+// Everything is refused until the connector authenticates, which lands in
+// Stage 29. Refusing by default rather than permitting by default means a method
+// added later without a permission check fails closed.
+func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated,
+		"authenticate before calling %s", method)
+}
+
+// wsTransport carries JSON-RPC over a WebSocket, and keeps documents out of it.
+//
+// Text frames are protocol messages. Binary frames are document data, which
+// never travels inside JSON: base64 would inflate it by a third and force the
+// whole file into memory, which on a 512MB machine is an out-of-memory kill
+// rather than an inefficiency. They are routed away here so the message layer
+// only ever sees messages.
+type wsTransport struct {
+	ws  *websocket.Conn
+	log *slog.Logger
+}
+
+func (t *wsTransport) ReadMessage(ctx context.Context) ([]byte, error) {
+	for {
+		kind, data, err := t.ws.Read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if kind == websocket.MessageText {
+			return data, nil
+		}
+		// Document streaming is Stage 35. Until then a binary frame is a
+		// connector doing something core cannot yet honour, and dropping the
+		// connection over it would be worse than saying so and carrying on.
+		t.log.Warn("ignoring a binary frame: document streaming is not implemented yet",
+			"bytes", len(data))
+	}
+}
+
+func (t *wsTransport) WriteMessage(ctx context.Context, data []byte) error {
+	writeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return t.ws.Write(writeCtx, websocket.MessageText, data)
 }
 
 // hello is the greeting every connection opens with, carrying the nonce the

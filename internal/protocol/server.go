@@ -285,8 +285,49 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 			"authenticate before calling %s", method)
 	}
 
-	// Registration and the rest of the method set arrive from Stage 30 onwards.
+	switch method {
+	case "register":
+		return c.register(ctx, params)
+	}
+
+	// The rest of the method set arrives from Stage 32 onwards.
 	return nil, jsonrpc.Errorf(jsonrpc.CodeMethodNotFound, "no method %q", method)
+}
+
+// register records what a connector says about itself and returns its current
+// settings.
+//
+// Called on every connection rather than once at install, because a connector
+// that has been upgraded may declare different settings, and the dashboard has
+// to render what the running version actually wants rather than what an older
+// one wanted.
+func (c *conn) register(ctx context.Context, params json.RawMessage) (any, error) {
+	connector := c.authenticated()
+
+	var manifest store.Manifest
+	if err := json.Unmarshal(params, &manifest); err != nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "manifest is not an object")
+	}
+
+	if err := c.db.Register(ctx, connector.ID, manifest); err != nil {
+		// Manifest problems are the connector's to fix, so the reason is sent
+		// back rather than swallowed as an internal error. This is one of the
+		// few places where saying exactly what went wrong helps the person who
+		// can act on it and tells an attacker nothing.
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "%s", err)
+	}
+
+	// Secrets included: this is the connector reading its own settings, and a
+	// connector that cannot read back its own bot token cannot use it.
+	settings, err := c.db.SettingsFor(ctx, connector.ID, true)
+	if err != nil {
+		return nil, err
+	}
+
+	c.log.Info("connector registered",
+		"name", manifest.Name, "version", manifest.Version, "settings", len(manifest.Settings))
+
+	return map[string]any{"settings": settings}, nil
 }
 
 type authenticateParams struct {

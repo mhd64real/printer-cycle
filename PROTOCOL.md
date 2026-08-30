@@ -220,9 +220,20 @@ cannot inject code into the dashboard.
   submitting, using section 8.
 
 **Settings field types:** `string`, `int`, `bool`, `enum` (with `options`), `secret`, `text`.
-Secrets are stored encrypted and are never returned in plaintext to any client, including the
-dashboard. The dashboard renders any schema it is given, so every connector past and future gets a
-settings page for free.
+The dashboard renders any schema it is given, so every connector past and future gets a settings page
+for free.
+
+**Corrected 2026-08-31.** An earlier draft said secret values are "stored encrypted and never
+returned in plaintext to any client, including the dashboard". Both halves were wrong.
+
+A connector needs its own secrets to work: a Telegram connector that cannot read back its bot token
+cannot talk to Telegram. So the rule is **a secret is returned to the connector that owns it, and to
+nobody else.** The dashboard can set one and can see that one is set, but never reads it back, so a
+token entered last year cannot be recovered by whoever has the browser open today.
+
+And they are not encrypted. On a box with no separate key store, the key would live beside the data
+it protects, which is theatre rather than protection. They are stored in a database file readable
+only by the user core runs as, and that is stated plainly rather than dressed up.
 
 ---
 

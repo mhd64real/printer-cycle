@@ -792,7 +792,35 @@ it. Test asserts shutdown completes in under two seconds with a connector attach
 ### Stage 30: Registration and manifest
 - `register`, manifest validation, settings schema stored, identity policy recorded.
 - **Done when:** a connector's declared settings survive a core restart.
-- **Status:** todo
+- **Status:** done, 2026-08-31. Tested by reopening the database from disk, which is what a restart
+  actually is, rather than by reading back from the same connection.
+
+**A contradiction in the specification, found by implementing it.** PROTOCOL.md section 6 said secret
+settings are "stored encrypted and never returned in plaintext to any client, including the
+dashboard". Both halves were wrong:
+
+- **A connector needs its own secrets to work.** A Telegram connector that cannot read back its bot
+  token cannot talk to Telegram. The rule is now: a secret goes to the connector that owns it, and to
+  nobody else. The dashboard can set one and can see that one is set, but never reads it back, so a
+  token typed in last year cannot be recovered by whoever has a browser open today.
+- **"Encrypted" was a claim with nowhere to keep the key.** On a box with no separate key store the
+  key lives beside the data it protects. The spec now says plainly that secrets sit in a database
+  file readable only by the user core runs as, which is the truth and is defensible; the previous
+  wording was neither.
+
+- **A behavioural difference across restarts, caught by a test.** The schema is stored as JSON, so a
+  default written as an integer comes back as a float once reloaded. A setting read as `20` before a
+  restart and `20.0` after would make comparisons behave differently on Tuesday than on Monday.
+  Defaults are now normalised to their declared type on the way out.
+- **Registration replaces rather than merges**, so a setting dropped in a connector's new version
+  stops appearing in the dashboard instead of lingering forever.
+- **A secret cannot have a default**, because that would be a secret written into the connector's own
+  source code.
+- Values are validated against the declared schema on write: an enum outside its options, an integer
+  past its bounds, a fraction where a whole number belongs, and a key never declared are all refused.
+- A malformed manifest returns the actual reason, unlike every other error in this layer. It is the
+  connector author's problem to fix, and naming the offending setting helps them while telling an
+  attacker nothing.
 
 ### Stage 31: Scope enforcement and IPP error translation
 - One middleware, deny by default, correct JSON-RPC error on refusal.
@@ -1232,3 +1260,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-31, after Stage 29:** no structural change. Added an authentication deadline that was not
   in the plan: an unauthenticated connection can do nothing but still costs resources, and on the
   target hardware that is worth closing rather than tolerating.
+- **2026-08-31, after Stage 30:** PROTOCOL.md section 6 corrected on secret settings. The spec said
+  secrets are never returned to any client, which would have made them useless, since a connector
+  needs its own credentials to function. It also claimed encryption that had nowhere to keep a key.
+  Both replaced with what is actually true and actually enforced.

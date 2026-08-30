@@ -1,6 +1,7 @@
 package protocol_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,3 +33,5 @@ func shortSocketPath(t *testing.T) string {
 func writeFile(path string) error {
 	return os.WriteFile(path, []byte("stale"), 0o600)
 }
+
+func ctx() context.Context { return context.Background() }

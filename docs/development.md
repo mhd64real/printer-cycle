@@ -109,6 +109,7 @@ then, and that is recorded rather than glossed over.
 | `make dev-logs` | follow container logs |
 | `make dev-shell` | a shell inside the CUPS container |
 | `make dev-down` | stop and remove the containers |
+| `make measure` | idle cost of the event loop; deliberately idles for a minute |
 | `make clean` | remove `bin/` and `dist/` |
 
 ## Layout
@@ -129,3 +130,4 @@ scripts/           installer and helpers
   once other people's repositories depend on it.
 - `PLAN.md` is the build plan, stage by stage, including a revision log explaining what reality
   forced and why.
+- `docs/performance.md` holds the measured costs the design decisions rest on.

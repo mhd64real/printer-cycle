@@ -12,7 +12,7 @@ LDFLAGS := -s -w -X $(MODULE)/internal/version.Version=$(VERSION)
 BINARIES  := core dashboard
 PLATFORMS := linux/arm64 linux/amd64 linux/arm
 
-.PHONY: all build build-all check vet fmt test test-integration clean dev-up dev-down dev-logs dev-shell dev-printers
+.PHONY: all build build-all check vet fmt test test-integration measure clean dev-up dev-down dev-logs dev-shell dev-printers
 
 all: build
 
@@ -53,6 +53,12 @@ DEV_CUPS ?= http://127.0.0.1:6631
 
 test-integration:
 	PRINTER_CYCLE_TEST_CUPS=$(DEV_CUPS) $(GO) test ./... -count=1 -v
+
+# What the event loop costs while nothing is happening. Idles for a minute on
+# purpose, so it is not part of the ordinary test run.
+measure:
+	PRINTER_CYCLE_MEASURE=1 PRINTER_CYCLE_TEST_CUPS=$(DEV_CUPS) \
+		$(GO) test ./internal/ipp/ -count=1 -v -timeout 10m -run TestMeasureIdleCost
 
 clean:
 	rm -rf bin dist

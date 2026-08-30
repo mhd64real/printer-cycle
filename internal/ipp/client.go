@@ -46,7 +46,15 @@ type Client struct {
 	// nextID hands out IPP request identifiers. They only need to be unique
 	// within a connection, so a counter is enough.
 	nextID atomic.Uint32
+
+	// requests counts exchanges attempted. Background loops that run forever
+	// are easy to get wrong, and this makes the cost of one observable rather
+	// than a matter of opinion.
+	requests atomic.Uint64
 }
+
+// Requests reports how many IPP exchanges this client has attempted.
+func (c *Client) Requests() uint64 { return c.requests.Load() }
 
 // New builds a client for a CUPS endpoint. Two forms are accepted:
 //
@@ -174,6 +182,7 @@ func (c *Client) send(ctx context.Context, path string, req *goipp.Message, body
 	}
 	httpReq.Header.Set("Content-Type", contentType)
 
+	c.requests.Add(1)
 	resp, err := c.httpc.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("ipp: sending request: %w", err)

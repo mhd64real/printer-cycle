@@ -500,7 +500,29 @@ job-completed          job-state=completed
   created work worth watching.
 - **Done when:** idle CPU and request rate are measured and recorded in `docs/`, and the intervals
   are justified by those numbers.
-- **Status:** todo
+- **Status:** done, 2026-08-30. Recorded in `docs/performance.md`.
+
+```
+idle window:       1m0s
+requests to cupsd: 35, 0.58/s
+core CPU:          22ms, 0.036% of one core
+cupsd CPU:         26ms, 0.043% of one core
+combined:          0.079% of one core
+```
+
+- **Decision: the intervals stand and no wake mechanism gets built.** This stage held open the option
+  of core polling immediately after submitting a job so the idle interval could stretch much further.
+  At 0.079% of a core there is nothing worth buying with that complexity. A Zero 2 W core is perhaps
+  ten to twenty times slower, putting the loop near 1 to 2% of one core out of four. The figure
+  survives being wrong by an order of magnitude, which is the only reason it is safe to lean on.
+- Production will read lower still: this measurement went over TCP through Docker's bridge, while a
+  real deployment uses a Unix socket on the same machine.
+- **The first measurement was wrong and said so loudly**: two requests in sixty seconds, which cannot
+  be true at a two second interval. CUPS's `AccessLogLevel` defaults to `config` and does not log IPP
+  requests at all. Replaced with a counter inside the client, which measures the thing actually cared
+  about, works in production, and does not depend on how somebody configured logging.
+- `Client.Requests()` was added for this and stays, because a loop that runs forever should have its
+  cost observable rather than arguable.
 
 ---
 
@@ -967,3 +989,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   Stage 19's done-when was rewritten rather than quietly satisfied. Stage 20 changed shape as a
   result: there is no fallback left to write, only intervals to justify with numbers. The connector
   protocol is untouched, which is the whole reason that layering exists.
+- **2026-08-30, after Stage 20: PHASE 2 COMPLETE.** The IPP client is done, and every assumption the
+  design rested on has been measured rather than assumed. Two turned out wrong (CUPS does not
+  long-poll; CUPS does emit a ranking hint) and both were corrected in place. `docs/performance.md`
+  now holds the numbers behind the design decisions, so later stages can argue with evidence.

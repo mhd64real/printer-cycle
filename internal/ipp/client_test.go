@@ -438,3 +438,109 @@ func TestPPDCatalogueSize(t *testing.T) {
 	t.Logf("unfiltered catalogue: %d drivers, fetched and decoded in %v",
 		len(all), time.Since(start).Round(10*time.Millisecond))
 }
+
+func TestPrinterNameValidation(t *testing.T) {
+	valid := []string{"file-ps", "Office_Laser", "hp.laserjet.1018", "a", strings.Repeat("x", 127)}
+	for _, n := range valid {
+		if err := ipp.ValidPrinterName(n); err != nil {
+			t.Errorf("ValidPrinterName(%q) = %v, want nil", n, err)
+		}
+	}
+
+	invalid := map[string]string{
+		"":                       "empty",
+		"Office Laser":           "a space, which is what users type first",
+		"floor/2":                "a slash",
+		"printer#1":              "a hash",
+		"bad\tname":              "a control character",
+		strings.Repeat("x", 128): "one character too long",
+	}
+	for n, why := range invalid {
+		if err := ipp.ValidPrinterName(n); err == nil {
+			t.Errorf("ValidPrinterName(%q) accepted %s", n, why)
+		}
+	}
+}
+
+// Users type readable names. CUPS refuses most of them. Sanitising has to
+// produce something legal without producing something unrecognisable.
+func TestSanitiseName(t *testing.T) {
+	cases := map[string]string{
+		"Office Laser":             "Office_Laser",
+		"Office Laser (2nd floor)": "Office_Laser_2nd_floor",
+		"  HP  LaserJet  1018  ":   "HP_LaserJet_1018",
+		"hp.laserjet-1018":         "hp.laserjet-1018",
+		"///":                      "",
+		"":                         "",
+	}
+	for in, want := range cases {
+		if got := ipp.SanitiseName(in); got != want {
+			t.Errorf("SanitiseName(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// Whatever comes out has to be something CUPS will actually accept, or the
+	// sanitiser has simply moved the failure further down the line.
+	for in := range cases {
+		got := ipp.SanitiseName(in)
+		if got == "" {
+			continue
+		}
+		if err := ipp.ValidPrinterName(got); err != nil {
+			t.Errorf("SanitiseName(%q) produced %q, which CUPS rejects: %v", in, got, err)
+		}
+	}
+}
+
+// TestAddAndDeletePrinterAgainstCUPS is the first operation that changes state
+// rather than reading it.
+func TestAddAndDeletePrinterAgainstCUPS(t *testing.T) {
+	c := integrationClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	const name = "printer-cycle-test-queue"
+
+	// Leave nothing behind, whatever happens in the middle.
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_ = c.DeletePrinter(cleanup, name)
+	})
+	_ = c.DeletePrinter(ctx, name)
+
+	err := c.AddPrinter(ctx, ipp.PrinterSpec{
+		Name:      name,
+		DeviceURI: "file:///var/spool/pc-out/test-queue.out",
+		PPDName:   "drv:///sample.drv/generic.ppd",
+		Info:      "Created by the printer-cycle test suite",
+		Location:  "Nowhere",
+	})
+	if err != nil {
+		t.Fatalf("AddPrinter: %v", err)
+	}
+
+	got, err := c.Printer(ctx, name)
+	if err != nil {
+		t.Fatalf("the queue was created but cannot be read back: %v", err)
+	}
+	if got.Info != "Created by the printer-cycle test suite" {
+		t.Errorf("Info = %q, the human-readable name did not survive", got.Info)
+	}
+	if got.State != ipp.PrinterStateIdle {
+		t.Errorf("State = %s, want idle: a freshly paired queue must be usable immediately", got.State)
+	}
+	if !got.AcceptingJobs {
+		t.Error("the new queue is not accepting jobs, so the first print would vanish")
+	}
+	t.Logf("created %s: %s, %s, %s", got.Name, got.MakeAndModel, got.State, got.DeviceURI)
+
+	if err := c.DeletePrinter(ctx, name); err != nil {
+		t.Fatalf("DeletePrinter: %v", err)
+	}
+
+	if _, err := c.Printer(ctx, name); !errors.Is(err, ipp.ErrNotFound) {
+		t.Errorf("after deletion, Printer returned %v, want ErrNotFound", err)
+	}
+}

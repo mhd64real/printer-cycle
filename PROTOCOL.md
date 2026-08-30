@@ -346,6 +346,11 @@ Two signals arrive inside `ppd-make-and-model` and both are ranking inputs:
 Passing a ppd explicitly is the manual override. Core issues `CUPS-Add-Modify-Printer` and returns
 the printer id. Requires `printers.manage`.
 
+**`name` is free text and stays free text.** CUPS queue names may not contain a space, a slash, or a
+hash, so "Office laser" is not a legal queue name. Core keeps what the user typed as the printer's
+display name and derives a sanitised queue name from it internally. Connectors never see or need the
+sanitised form, and a connector must not sanitise names itself.
+
 **printers.remove** takes a printer id and issues `CUPS-Delete-Printer`.
 
 Note on naming: AirPrint appears in both directions in this system. Core *consumes* AirPrint

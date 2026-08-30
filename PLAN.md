@@ -360,7 +360,24 @@ drv:///hpcups.drv/hp-laserjet_1018.ppd       HP LaserJet 1018, hpcups 3.22.10, r
 - `CUPS-Add-Modify-Printer` and `CUPS-Delete-Printer`.
 - **Done when:** a queue can be created and removed from Go, and it shows up in the CUPS web UI in
   between.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Proof:** a queue created from Go, read back with the right driver, then listed by cupsd's own web
+  UI under both its name and its description, then deleted and confirmed gone by a typed
+  `ErrNotFound`.
+- **CUPS queue names cannot hold what users type.** No space, no slash, no hash, 127 characters.
+  "Office Laser" is illegal. So `PrinterSpec` carries a separate `Info` field for the readable name
+  and `SanitiseName` derives a legal queue name from it. PROTOCOL.md updated to say the `name` a
+  connector sends is free text that core sanitises internally, and that a connector must not sanitise
+  it itself. A test asserts everything `SanitiseName` produces is something `ValidPrinterName`
+  accepts, so the sanitiser cannot just move the failure further down the line.
+- **`printer-is-shared` defaults to false, and this heads off a real conflict.** With Avahi present,
+  CUPS advertises shared queues itself. printer-cycle publishes printers through connectors, so
+  leaving sharing on would put one physical printer on the network twice, under two identities, from
+  the same box, with no way for a user to tell which to choose.
+- **New queues are left enabled and accepting jobs.** Every path reaching AddPrinter is a user asking
+  for a printer they intend to use, and a queue needing a second enabling step is a queue that
+  silently swallows the first print job.
+- Admin operations POST to `/admin/`, not `/`.
 
 ### Stage 17: Print-Job with a streaming body
 - IPP header first, then document bytes, through an `io.Pipe`, so nothing large is ever fully
@@ -819,3 +836,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   matching produces false positives (LaserJet 4 matching Color LaserJet 4730 MFP), so the ranking
   table is necessary rather than merely nice. Added caching to Stage 54: filtered queries cost 2 to 5
   seconds, which no interactive screen can pay repeatedly.
+- **2026-08-30, after Stage 16:** PROTOCOL.md section 7b clarified that `printers.add`'s `name` is
+  free text which core sanitises into a CUPS queue name, since CUPS forbids spaces and users type
+  them constantly. Recorded the `printer-is-shared: false` decision, which prevents CUPS and the
+  AirPrint connector both advertising the same printer.

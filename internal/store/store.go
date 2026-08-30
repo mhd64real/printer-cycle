@@ -66,7 +66,33 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, err
 	}
+
+	if path != ":memory:" {
+		if err := restrictPermissions(path); err != nil {
+			sqlDB.Close()
+			return nil, err
+		}
+	}
 	return db, nil
+}
+
+// restrictPermissions keeps the database readable only by the user running
+// core.
+//
+// It holds password hashes. Those are argon2id and expensive to attack, but a
+// world-readable file full of them is still a file worth copying, and the
+// default 0644 is a poor default for something under /var/lib.
+//
+// The write-ahead log and shared-memory files are covered too: SQLite creates
+// them with the main file's permissions, but a database made before this
+// existed would keep its old mode and pass them on.
+func restrictPermissions(path string) error {
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(p, 0o600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("store: securing %s: %w", p, err)
+		}
+	}
+	return nil
 }
 
 // dsn builds the connection string, including the pragmas that matter.

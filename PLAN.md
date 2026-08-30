@@ -662,7 +662,37 @@ enrolment flow, since a brand new connector has no key to sign with until it reg
 - On an empty database, core prints a one-time setup token to stdout and writes it to a file with
   tight permissions. The dashboard uses it to register itself and create the first admin.
 - **Done when:** a fresh install goes from empty to logged-in dashboard with no manual database work.
-- **Status:** todo
+- **Status:** done, 2026-08-31, **for the half that exists.** The dashboard is Phase 5, so the
+  browser-facing end of this cannot be demonstrated yet. Everything core owns is built and tested,
+  and Stage 44 completes the sentence.
+
+**`cmd/core` stopped being a stub.** It opens its database, performs first-run setup, and prints:
+
+```
+printer-cycle is not set up yet.
+
+  Setup token:  PCE-2441B-RXWGG-N8763-Z6WEY
+
+Open the dashboard and enter that token to create the first account.
+```
+
+- **The circle this breaks.** The dashboard is a connector, and connectors authenticate with a key
+  core already knows. A new box knows no keys, and there is no administrator who could approve one,
+  because creating the administrator is what the dashboard is for. Core breaks it by writing a
+  single-use token where only somebody with access to the machine can read it: the console, and a
+  file at mode 0600.
+- **A fresh token on every start, with the previous one invalidated.** Not really a choice: only a
+  hash of a token is stored, so an earlier one cannot be reprinted. Issuing anew each start is the
+  only behaviour leaving exactly one valid token in existence, which is also the one on screen. The
+  banner says so, because a user who restarts and pastes the old token deserves an explanation.
+- **First-run enrolment enables the dashboard, and nothing else.** There is nobody to approve it yet,
+  so a valid single-use token from the machine's own console is the authorisation. The exemption is
+  deliberately narrow: it names the dashboard specifically and stops the moment any account exists.
+  Both halves are tested. "Nothing else could hold a token on a fresh box anyway" is probably true and
+  is not a reason to write the broader rule.
+- **The database is now mode 0600.** It holds argon2id password hashes, which are expensive to attack
+  but still worth nobody copying, and 0644 under `/var/lib` is a poor default. The write-ahead log and
+  shared-memory files are covered too.
 
 ---
 
@@ -1112,3 +1142,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-31, after Stage 25:** removed the `b64:` prefix from the spec's nonce and proof fields
   before anyone had to implement it. Small, but it is exactly the kind of thing that is free to fix
   now and permanent once connectors exist.
+- **2026-08-31, after Stage 26: PHASE 3 COMPLETE.** Storage, users, connector registry, Ed25519
+  enrolment and first-run setup all done. `cmd/core` is a real program rather than a stub, though it
+  exits after setup because the connector server is Phase 4. Stage 26 is honestly half-finished:
+  everything core owns works, and Stage 44 supplies the browser half.

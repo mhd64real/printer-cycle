@@ -226,10 +226,24 @@ func (db *DB) Enrol(ctx context.Context, token string, publicKey ed25519.PublicK
 		return Connector{}, ErrEnrolmentInvalid
 	}
 
+	// Enrolling normally does not enable anything: an administrator decides
+	// what runs. During first run there is no administrator to decide, because
+	// creating one is what the dashboard exists to do, so possession of a valid
+	// single-use token from the machine's own console is the authorisation.
+	//
+	// Narrow on purpose. It applies only to the dashboard, and only while no
+	// account exists. "Nothing else could hold a token on a fresh box anyway" is
+	// probably true and is not a reason to write the broader rule.
+	var users int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&users); err != nil {
+		return Connector{}, err
+	}
+	firstRun := users == 0 && connectorID == DashboardConnectorID
+
 	encoded := base64.StdEncoding.EncodeToString(publicKey)
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE connectors SET auth_method = 'ed25519', credential = ? WHERE id = ?`,
-		encoded, connectorID); err != nil {
+		`UPDATE connectors SET auth_method = 'ed25519', credential = ?, enabled = ? WHERE id = ?`,
+		encoded, boolToInt(firstRun), connectorID); err != nil {
 		return Connector{}, err
 	}
 	if _, err := tx.ExecContext(ctx,

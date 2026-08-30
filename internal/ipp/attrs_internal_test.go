@@ -135,3 +135,55 @@ func TestCheckCarriesTheServerMessage(t *testing.T) {
 		t.Errorf("Error() = %q, should include the server message", err.Error())
 	}
 }
+
+// CUPS mixes pseudo-devices in with real ones: every backend advertises itself
+// with a bare scheme as its URI, carrying class=network exactly like a real
+// network printer. Showing those in a "printers we found" list would offer the
+// user four things to pair with that are not printers.
+func TestPairableRejectsBackendPseudoDevices(t *testing.T) {
+	real := []string{
+		"dnssd://Virtual%20Office%20Printer._ipp._tcp.local/",
+		"usb://HP/LaserJet%201018?serial=KP123",
+		"socket://192.168.1.50:9100",
+		"ipp://printer.local/ipp/print",
+		"file:///var/spool/pc-out/file-ps.out",
+	}
+	for _, uri := range real {
+		if !pairable(uri) {
+			t.Errorf("pairable(%q) = false, want true", uri)
+		}
+	}
+
+	// These are exactly what CUPS returns for its own backends.
+	pseudo := []string{"beh", "ipp", "ipps", "http", "https", "lpd", "socket", "cups-brf:/", ""}
+	for _, uri := range pseudo {
+		if pairable(uri) {
+			t.Errorf("pairable(%q) = true, want false: that is a backend, not a device", uri)
+		}
+	}
+}
+
+// "Unknown" is CUPS's placeholder for "the backend could not identify this".
+// Passing it through would print the word Unknown in a column headed Model, as
+// though the printer were manufactured by a company called Unknown.
+func TestParseDeviceTreatsUnknownModelAsAbsent(t *testing.T) {
+	var attrs goipp.Attributes
+	attrs.Add(goipp.MakeAttribute("device-uri", goipp.TagURI, goipp.String("dnssd://Some%20Printer._ipp._tcp.local/")))
+	attrs.Add(goipp.MakeAttribute("device-make-and-model", goipp.TagText, goipp.String("Unknown")))
+	attrs.Add(goipp.MakeAttribute("device-class", goipp.TagKeyword, goipp.String("network")))
+	attrs.Add(goipp.MakeAttribute("device-info", goipp.TagText, goipp.String("Some Printer")))
+
+	d, ok := parseDevice(attrs)
+	if !ok {
+		t.Fatal("parseDevice rejected a real device")
+	}
+	if d.MakeAndModel != "" {
+		t.Errorf("MakeAndModel = %q, want empty", d.MakeAndModel)
+	}
+	if d.Info != "Some Printer" {
+		t.Errorf("Info = %q, want the name to survive", d.Info)
+	}
+	if d.Transport != "dnssd" {
+		t.Errorf("Transport = %q, want dnssd", d.Transport)
+	}
+}

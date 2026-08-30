@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -256,4 +257,39 @@ func TestPrinterByNameAgainstCUPS(t *testing.T) {
 		t.Errorf("State = %s, want idle", p.State)
 	}
 	t.Logf("%s: %s, %s", p.Name, p.MakeAndModel, p.State)
+}
+
+// TestDevicesAgainstCUPS is what the second dev container exists for: proving
+// discovery returns real hardware-shaped results rather than an empty list.
+func TestDevicesAgainstCUPS(t *testing.T) {
+	c := integrationClient(t)
+
+	// Generous: the SNMP backend waits out a subnet broadcast before CUPS
+	// answers at all.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	devices, err := c.Devices(ctx, 10*time.Second)
+	if err != nil {
+		t.Fatalf("Devices: %v", err)
+	}
+
+	var found bool
+	for _, d := range devices {
+		t.Logf("%-8s class=%-8s uri=%s", d.Transport, d.Class, d.URI)
+
+		// Every backend advertises itself with a bare scheme as its URI. If one
+		// of those survived the filter, the dashboard would offer users
+		// "printers" that are really connection types.
+		if !strings.Contains(d.URI, ":") {
+			t.Errorf("a pseudo-device got through the filter: %q", d.URI)
+		}
+		if d.Transport == "dnssd" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Fatalf("no dnssd device discovered among %d results. Is the virtual printer container up, and did mDNS have a few seconds? Run: make dev-up", len(devices))
+	}
 }

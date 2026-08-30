@@ -279,8 +279,21 @@ five to ten seconds. Clients render devices as they arrive; they never block on 
 }}
 ```
 
-`transport` is one of `usb`, `dnssd`, `snmp`, `lpd`, `socket`. `driverless` is true for IPP
-Everywhere devices, which need no driver at all.
+`transport` is the device URI's scheme: `usb`, `dnssd`, `ipp`, `ipps`, `socket`, `lpd`, `serial`.
+
+**Corrected 2026-08-30, after implementing discovery.** An earlier draft listed `snmp` as a possible
+value. There is no `snmp://` scheme. `transport` says how printer-cycle will TALK to a device, not
+how it was FOUND, and a printer the SNMP backend discovered comes back as `socket` or `lpd`, because
+that is how you print to it. CUPS reports no attribute naming the discovering backend, so any field
+claiming to would have been fiction.
+
+`device_id` is frequently empty, and that is not a fault. Driverless IPP Everywhere printers have no
+need of one, and some backends never ask. Automatic driver selection depends on it, so a device
+without one goes down the manual path rather than the one-click path.
+
+`make_and_model` is empty when the backend could not identify the hardware. CUPS sends the literal
+string `Unknown` in that case; core normalises it away, because rendering "Unknown" under a heading
+that says Model reads as a manufacturer name.
 
 **printers.probe** resolves a bare address the user typed by hand. Core tries 631 (IPP), then 9100
 (JetDirect), then 515 (LPD), and queries SNMP for the model so driver selection still works from

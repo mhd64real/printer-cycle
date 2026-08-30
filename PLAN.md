@@ -618,6 +618,25 @@ enrolment flow, since a brand new connector has no key to sign with until it reg
   decision recorded under Stage 22 and PROTOCOL.md section 4.
 - **Done when:** a connector can be enrolled with a single-use token, its public key is stored, and
   the token cannot be reused.
+- **Status:** done, 2026-08-31
+- **A new connector arrives disabled and unenrolled.** Installing something is never the same act as
+  trusting it: it has no key, and nothing runs until an administrator turns it on. Enabling one that
+  has not enrolled is refused outright, since an entry that looks live in the dashboard while
+  rejecting every connection is worse than one that is plainly off.
+- Only a **hash** of each enrolment token is stored. Core never needs the token again, only to
+  recognise one being presented, so keeping it would mean storing a bearer credential for nothing.
+  Same reasoning that made connector authentication Ed25519: hold the least that still works.
+- **Unknown, expired, used and malformed tokens all return one error.** Anything more specific tells
+  whoever is guessing which guess came closest.
+- **Deleting a connector revokes its outstanding tokens**, so an unused one cannot enrol a key
+  against an id somebody reinstalls later. Tested by doing exactly that.
+- **Scopes are a closed set and a typo is refused.** Silently storing `printers.mangage` would produce
+  a connector that looks permitted in the dashboard and is denied at every call, which is a miserable
+  thing to debug.
+- **A test of mine was wrong and the failure was the useful kind.** It tried to mint an expired token
+  by asking for a negative lifetime, but a non-positive TTL is treated as "use the default hour", so
+  nothing was ever expired and the assertion was vacuous. Rewritten to age the row and exercise the
+  real expiry path.
 
 ### Stage 25: Ed25519 nonce verification
 - Per-connection random nonce, Ed25519 signature verification against the stored public key.
@@ -1076,3 +1095,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-31, after Stage 23:** no structural change. Argon2id sized for 512 MiB shared with
   Ghostscript rather than for a server, and the timing-equalisation on unknown usernames recorded,
   since both are the kind of decision that looks arbitrary later without the reason attached.
+- **2026-08-31, after Stage 24:** Ed25519 enrolment implemented as decided. Added migration
+  0003 for enrolment tokens, which the Stage 22 schema did not anticipate because the flow did not
+  exist until the auth decision was made.

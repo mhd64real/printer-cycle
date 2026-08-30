@@ -258,7 +258,30 @@ typed error: ipp: Get-Printer-Attributes: client-error-not-found: The printer or
   but **SNMP discovery cannot be tested without either real hardware or a simulated SNMP printer
   agent.** SNMP is the path that finds exactly the old network lasers this product exists for, so
   this is not a trivial gap. It stays unverified until Phase 9.
-- **Status:** todo
+- **Status:** done, 2026-08-30
+- **Proof:** discovery returns exactly the three real devices, every backend pseudo-entry filtered:
+
+```
+ipps   class=network  uri=ipps://Virtual%20Office%20Printer._ipps._tcp.local/
+dnssd  class=network  uri=dnssd://Virtual%20Office%20Printer._ipp._tcp.local/?uuid=e2e12bda-...
+dnssd  class=network  uri=dnssd://Virtual%20Office%20Printer._printer._tcp.local/
+```
+
+- **A real bug, caught by a test before it shipped.** The first implementation used `net/url` to pull
+  scheme and host out of a device URI. `url.Parse` rejects percent-encoding in the host, and CUPS
+  puts the DNS-SD service name in the host position, so `dnssd://Virtual%20Office%20Printer._ipp...`
+  parsed to an empty host and was discarded. **Every printer whose name contains a space would have
+  vanished from discovery, which is most printers.** Replaced with plain scheme splitting.
+- **CUPS mixes pseudo-devices in with real ones.** Each backend advertises itself as a device whose
+  URI is a bare scheme (`beh`, `ipp`, `lpd`, `socket`), carrying `class=network` exactly like a real
+  network printer, so class cannot separate them and the URI is the only discriminator. Unfiltered,
+  the pairing screen would have offered seven things to pair with that are not printers.
+- **`Unknown` is normalised to empty.** CUPS sends that literal string when a backend cannot identify
+  hardware, and rendering it under a heading that says Model reads as a manufacturer name.
+- **PROTOCOL.md corrected.** Section 7b listed `snmp` as a `transport` value. There is no `snmp://`
+  scheme: transport says how to talk to a device, not how it was found, and SNMP-discovered printers
+  arrive as `socket` or `lpd`. CUPS exposes no attribute naming the discovering backend, so the field
+  as specified was fiction.
 
 ### Stage 14: Streaming discovery
 - Read the response progressively so devices surface as they are found instead of after the SNMP
@@ -704,3 +727,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   identically while the protocol gives them different codes. Only the calling layer knows which was
   asked for. Stage 12 delivered the typed errors that mapping will consume, and the intended
   correspondence is written down in `internal/ipp/errors.go` so it does not get lost in the gap.
+- **2026-08-30, after Stage 13:** PROTOCOL.md section 7b corrected: `transport` is the device URI
+  scheme, and the `snmp` value it previously allowed does not exist. The spec was wrong in a way only
+  implementation could reveal, which is the argument for building the IPP layer before the protocol
+  server rather than after it.

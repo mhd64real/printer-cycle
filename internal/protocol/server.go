@@ -8,6 +8,7 @@ package protocol
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -203,8 +204,19 @@ type conn struct {
 	ws        *websocket.Conn
 	rpc       *jsonrpc.Conn
 	challenge *connauth.Challenge
+	db        *store.DB
 	log       *slog.Logger
+
+	mu        sync.Mutex
+	connector *store.Connector // nil until authenticated
 }
+
+// authTimeout is how long a connection has to authenticate before it is closed.
+//
+// An unauthenticated connection consumes a goroutine, a socket and a slice of
+// memory while being able to do nothing at all. On a machine with 512MB, letting
+// them accumulate is how an idle box runs out of room.
+const authTimeout = 30 * time.Second
 
 func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -229,6 +241,7 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 	c := &conn{
 		ws:        ws,
 		challenge: challenge,
+		db:        s.db,
 		log:       s.log.With("remote", r.RemoteAddr),
 	}
 	s.track(c)
@@ -244,6 +257,15 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Close the connection if it has not authenticated in time.
+	authDeadline := time.AfterFunc(authTimeout, func() {
+		if c.authenticated() == nil {
+			c.log.Debug("closing a connection that never authenticated")
+			c.ws.Close(websocket.StatusPolicyViolation, "authentication timed out")
+		}
+	})
+	defer authDeadline.Stop()
+
 	if err := c.rpc.Serve(ctx); err != nil {
 		c.log.Debug("connector disconnected", "error", err)
 	}
@@ -251,12 +273,114 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 
 // Handle dispatches an incoming request from a connector.
 //
-// Everything is refused until the connector authenticates, which lands in
-// Stage 29. Refusing by default rather than permitting by default means a method
+// Everything except authenticate is refused until the connector has proved who
+// it is. Refusing by default rather than permitting by default means a method
 // added later without a permission check fails closed.
 func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
-	return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated,
-		"authenticate before calling %s", method)
+	if method == "authenticate" {
+		return c.authenticate(ctx, params)
+	}
+	if c.authenticated() == nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated,
+			"authenticate before calling %s", method)
+	}
+
+	// Registration and the rest of the method set arrive from Stage 30 onwards.
+	return nil, jsonrpc.Errorf(jsonrpc.CodeMethodNotFound, "no method %q", method)
+}
+
+type authenticateParams struct {
+	ConnectorID string `json:"connector_id"`
+	Proof       string `json:"proof"`
+}
+
+type authenticateResult struct {
+	ConnectorID string   `json:"connector_id"`
+	Scopes      []string `json:"scopes"`
+}
+
+// dummyKey stands in for a connector that does not exist, so an unknown id costs
+// the same work as a real one and cannot be told apart by how quickly it fails.
+var dummyKey = func() ed25519.PublicKey {
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		panic("protocol: cannot generate a dummy key: " + err.Error())
+	}
+	return pub
+}()
+
+// authenticate verifies a connector's signature over this connection's nonce.
+//
+// Every failure returns the same error. An unknown connector, a disabled one,
+// one that has never enrolled a key, and a bad signature are indistinguishable
+// from outside, because telling them apart would let anyone who can reach the
+// port map out which connectors a household has installed.
+func (c *conn) authenticate(ctx context.Context, params json.RawMessage) (any, error) {
+	var p authenticateParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
+	}
+
+	proof, err := base64.StdEncoding.DecodeString(p.Proof)
+	if err != nil {
+		// Still spend the challenge: one connection, one attempt, whatever the
+		// attempt looked like.
+		_ = c.challenge.Verify(dummyKey, nil)
+		return nil, authFailed()
+	}
+
+	key := dummyKey
+	var connector *store.Connector
+
+	if found, err := c.db.Connector(ctx, p.ConnectorID); err == nil {
+		if found.Enrolled() && found.Enabled {
+			key = found.PublicKey
+			connector = &found
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+
+	if err := c.challenge.Verify(key, proof); err != nil {
+		if errors.Is(err, connauth.ErrSpent) {
+			return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated,
+				"this connection has already made an authentication attempt")
+		}
+		c.log.Warn("authentication failed", "connector", p.ConnectorID)
+		return nil, authFailed()
+	}
+	if connector == nil {
+		// The signature verified against the dummy key, which cannot happen,
+		// but failing closed costs nothing.
+		return nil, authFailed()
+	}
+
+	c.mu.Lock()
+	c.connector = connector
+	c.mu.Unlock()
+
+	if err := c.db.TouchConnector(ctx, connector.ID); err != nil {
+		c.log.Warn("cannot record that a connector was seen", "connector", connector.ID, "error", err)
+	}
+	c.log = c.log.With("connector", connector.ID)
+	c.log.Info("connector authenticated", "scopes", len(connector.Scopes))
+
+	scopes := connector.Scopes
+	if scopes == nil {
+		scopes = []string{}
+	}
+	return authenticateResult{ConnectorID: connector.ID, Scopes: scopes}, nil
+}
+
+func authFailed() error {
+	return jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated, "authentication failed")
+}
+
+// authenticated returns the connector this connection proved to be, or nil.
+func (c *conn) authenticated() *store.Connector {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connector
 }
 
 // wsTransport carries JSON-RPC over a WebSocket, and keeps documents out of it.

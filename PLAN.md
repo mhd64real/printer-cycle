@@ -769,7 +769,25 @@ it. Test asserts shutdown completes in under two seconds with a connector attach
 ### Stage 29: Handshake
 - `hello` with nonce, `authenticate`, granted scopes returned.
 - **Done when:** an unauthenticated client can call nothing but `authenticate`.
-- **Status:** todo
+- **Status:** done, 2026-08-31, tested under `-race`.
+- **The test client is written the way a third party would have to write one:** dial, read the
+  greeting, sign the nonce, call authenticate. That is a check on the specification as much as on the
+  code, since anything awkward to do from outside shows up immediately.
+- **Every way of failing looks identical.** Unknown connector, one that never enrolled a key, one
+  that is switched off, and a wrong signature all return the same code and the same message. A test
+  compares the messages to each other rather than to a constant, because the property that matters is
+  that they cannot be told apart. Otherwise anyone who can reach the port could map out which
+  connectors a household has installed.
+- **The challenge is spent by any attempt at all**, including one with unparseable base64. One
+  connection means one attempt, whatever that attempt looked like. A connection that stayed usable
+  after a failure would be an unlimited guessing seat.
+- **A proof captured from another connection is refused**, which is the entire reason the nonce is per
+  connection rather than per connector.
+- **Connections that never authenticate are closed after 30 seconds.** One consumes a goroutine, a
+  socket and some memory while able to do nothing, and on a 512MB machine letting them accumulate is
+  how an idle box runs out of room.
+- **An unknown connector still costs a signature verification**, against a dummy key, so a name that
+  does not exist cannot be identified by how quickly it fails.
 
 ### Stage 30: Registration and manifest
 - `register`, manifest validation, settings schema stored, identity policy recorded.
@@ -1211,3 +1229,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-31, after Stage 28:** no structural change. The message layer lives in `internal/jsonrpc`
   with no transport dependency, which is what let the correlation and lifetime behaviour be tested
   without a socket in the way.
+- **2026-08-31, after Stage 29:** no structural change. Added an authentication deadline that was not
+  in the plan: an unauthenticated connection can do nothing but still costs resources, and on the
+  target hardware that is worth closing rather than tolerating.

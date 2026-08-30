@@ -558,7 +558,36 @@ combined:          0.079% of one core
 - `users`, `printers`, `connectors`, `connector_scopes`, `connector_settings`, `identity_links`,
   `jobs`. Multi-user from the first migration, as decided.
 - **Done when:** the schema is applied and documented in `docs/schema.md`.
-- **Status:** todo
+- **Status:** done, 2026-08-30. Nine tables, documented in `docs/schema.md`.
+- Tests assert the schema's **invariants**, not merely that it applies: cascade behaviour, the
+  case-insensitive username collision, one external identity per connector, `cups_job_id` unique only
+  among jobs that have one, and the CHECK constraints refusing nonsense.
+- **Deleting a connector must not delete its jobs.** `jobs.connector_id` goes null instead. Somebody
+  uninstalling a Telegram bot should not lose the record of everything they printed through it.
+  Deleting a printer does cascade, since a job with no printer is a row nothing can render.
+- **Orphaned scopes would be a security bug**, so connector deletion takes scopes, settings and
+  identity links with it. Otherwise reinstalling a connector under the same id would silently inherit
+  permissions somebody had revoked.
+- **An open question was surfaced rather than decided.** See the next entry.
+
+### OPEN DECISION, raised at Stage 22: what core stores to authenticate connectors
+
+PROTOCOL.md section 4 specifies HMAC-SHA256 over a per-connection nonce. The secret is never
+transmitted, which is what makes plaintext acceptable on a home LAN, and that property holds.
+
+But **verifying an HMAC requires holding the secret**, so core cannot store a hash of it. The database
+therefore contains, in readable form, credentials for every connector on the box. Anyone who can read
+that file can impersonate all of them.
+
+**Ed25519 would remove that entirely.** The connector generates a keypair at install, hands core the
+public key, and signs the nonce. Core stores only public keys, so a copied database is worth nothing.
+Same shape, same round trips, an available library in every language worth writing a connector in.
+PROTOCOL.md already sends `auth` as a list, so adding it is additive, and section 4 is still marked
+PROPOSED with nothing depending on it yet.
+
+The schema supports either through `auth_method` and `credential`, so Stage 24 can implement whichever
+Mohamed chooses. Not decided here, because changing a security decision in the protocol is not a call
+to make quietly.
 
 ### Stage 23: Users
 - Create, list, delete. Argon2id password hashing. First user is admin.
@@ -1013,3 +1042,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-30, after Stage 21:** no structural change. Recorded the size cost of the pure-Go SQLite
   driver (1.5MB to 6.1MB on arm64) and the decision to serialise database access with a single
   connection, which suits a household-scale print server and removes a class of concurrency bug.
+- **2026-08-30, after Stage 22:** raised an open decision rather than settling it. HMAC connector
+  authentication forces core to store every connector's secret in recoverable form, so reading the
+  database file is enough to impersonate all of them. Ed25519 would leave core holding only public
+  keys. The schema was built to support either, and Stage 24 implements whichever is chosen.

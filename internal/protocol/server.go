@@ -314,6 +314,14 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.printersDiscover(ctx, params)
 	case "printers.probe":
 		return c.printersProbe(ctx, params)
+	case "printers.list":
+		return c.printersList(ctx)
+	case "printers.driverCandidates":
+		return c.printersDriverCandidates(ctx, params)
+	case "printers.add":
+		return c.printersAdd(ctx, params)
+	case "printers.remove":
+		return c.printersRemove(ctx, params)
 	}
 
 	// Unreachable: authorise refuses anything absent from the permission table,

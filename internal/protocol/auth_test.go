@@ -300,9 +300,12 @@ func TestAuthenticationChangesWhatIsRefused(t *testing.T) {
 		t.Fatal(resp.Error)
 	}
 
-	resp := c.call("printers.list", map[string]any{})
+	// A name deliberately chosen never to exist. An earlier version used a real
+	// method that had not been built yet, which made the test expire the moment
+	// it was: a test asserting a feature is absent has a shelf life.
+	resp := c.call("no.such.method.will.ever.exist", map[string]any{})
 	if resp.Error == nil {
-		t.Fatal("printers.list is not implemented yet but returned success")
+		t.Fatal("a method that does not exist returned success")
 	}
 	if resp.Error.Code == jsonrpc.CodeNotAuthenticated {
 		t.Error("still reporting not authenticated after a successful handshake")

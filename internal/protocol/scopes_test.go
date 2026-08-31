@@ -94,7 +94,9 @@ func TestAMethodNotInThePermissionTableDoesNotExist(t *testing.T) {
 	url, db := testServer(t)
 	c := authedClient(t, url, db, "telegram", store.KnownScopes())
 
-	for _, method := range []string{"printers.add", "jobs.submit", "settings.get", "nonsense"} {
+	// Names chosen never to be implemented. Listing methods that merely had not
+	// been built yet made this test expire as soon as they were.
+	for _, method := range []string{"nonsense", "printers.explode", "jobs.teleport"} {
 		resp := c.call(method, map[string]any{})
 		if resp.Error == nil {
 			t.Errorf("%s succeeded despite not being in the permission table", method)

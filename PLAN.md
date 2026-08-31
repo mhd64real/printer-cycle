@@ -938,7 +938,44 @@ device 3 at 610ms of 610ms
 ### Stage 34: printers.add and printers.remove
 - Pairing, with `ppd: null` meaning use the top-ranked candidate.
 - **Done when:** a discovered device becomes a working queue in one call.
-- **Status:** todo
+- **Status:** done, 2026-08-31. The product's central promise, working:
+
+```
+queue=pctest_TestAddingAPrinterInOneCall  driver=foo2zjs:0/ppd/foo2zjs/HP-LaserJet_1018.ppd  automatic=true
+```
+
+  A device id in, a working CUPS queue out, with the driver chosen and the readable name preserved.
+- **`printers.driverCandidates` and `printers.list` came with it**, since choosing a driver needs
+  candidates and pairing is pointless if nothing lists the result.
+- **Automatic choice avoids drivers needing a closed vendor plugin**, tested against the LaserJet
+  1018, where hpcups needs HP's binary that will never run on ARM and foo2zjs is open and works. The
+  ranking is still interim: prefer what CUPS marks `(recommended)`, never silently pick a proprietary
+  one while an open alternative exists, otherwise take the first. Stage 54 replaces it.
+- **The database row is written before CUPS is touched**, which reserves the queue name. If CUPS then
+  refuses, the row is removed, so a failed attempt does not consume the name the user asked for and
+  leave their second try called "Office Laser 2" for no visible reason. Tested with a driver that does
+  not exist.
+- **Two printers may share a name.** A household with two identical printers is ordinary; the queue
+  name gets a suffix and the display name is left alone.
+- **Removing tolerates a queue that is already gone.** The intended state is that it does not exist,
+  and it does not.
+
+**Two problems the tests found, neither of them in the feature being built.**
+
+**CUPS hides unshared printers from remote clients.** A test checked the queue existed by listing
+printers over IPP and found nothing, while `lpstat` inside the container showed it there. The cause is
+the same sharing rule from Stage 17 in a new guise: printer-cycle creates queues unshared so CUPS does
+not advertise a printer the connectors already advertise, and CUPS will not show those to a remote
+client. Production reaches cupsd over a Unix socket and counts as local, so it sees everything. The
+test now asks the container directly, which is ground truth either way.
+
+**Tests were sharing one CUPS while each got a fresh database.** Two tests used the same printer name,
+so one test's cleanup deleted the other's queue, which failed in a way that looked exactly like the
+code losing printers. Test printers are now named after the test that creates them.
+
+**And two of my own tests expired.** They asserted `printers.list` and `printers.add` did not exist,
+which was true when written. A test that asserts a feature is absent has a shelf life; they now use
+names chosen never to be implemented.
 
 ### Stage 35: jobs.submit and binary streaming
 - Allocate a stream id, accept binary frames, pipe them into Print-Job.
@@ -1366,3 +1403,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   answer on 9100 or 515 and say nothing about themselves, so without SNMP they get no automatic driver
   selection. Also fixed a flake I had introduced two stages earlier by asserting on CUPS's internal
   timing, moving that assertion to a synthetic stream instead of removing it.
+- **2026-08-31, after Stage 34:** `printers.list` and `printers.driverCandidates` implemented here
+  rather than later, because choosing a driver needs candidates and pairing is pointless if nothing
+  lists the result. Recorded that CUPS hides unshared printers from remote clients, which affects any
+  deployment pointing core at CUPS on another machine. Learned to stop writing tests that assert a
+  feature does not exist yet.

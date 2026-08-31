@@ -25,7 +25,8 @@ var methodScopes = map[string]string{
 	// it is.
 	"register": scopeNone,
 
-	"users.list": store.ScopeUsersRead,
+	"users.list":        store.ScopeUsersRead,
+	"printers.discover": store.ScopePrintersRead,
 }
 
 // requiredScope reports the scope a method needs, and whether it exists at all.

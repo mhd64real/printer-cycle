@@ -308,10 +308,17 @@ five to ten seconds. Clients render devices as they arrive; they never block on 
   "device_uri":"usb://HP/LaserJet%201018?serial=KP123",
   "device_id":"MFG:Hewlett-Packard;MDL:HP LaserJet 1018;CMD:ZJS;",
   "make_and_model":"HP LaserJet 1018",
-  "transport":"usb",
-  "driverless":false
+  "info":"HP LaserJet 1018",
+  "location":"",
+  "transport":"usb"
 }}
 ```
+
+**`driverless` was removed on 2026-08-31.** An earlier draft carried a boolean saying whether a device
+speaks IPP Everywhere and needs no driver. CUPS does not report it: `CUPS-Get-Devices` names no
+backend and exposes no such attribute, so the field could only ever have been guessed at from the URI
+scheme. Whether a device needs a driver is answered by `printers.driverCandidates`, where a device
+that needs none comes back with `everywhere` as its recommendation. One place, from real data.
 
 `transport` is the device URI's scheme: `usb`, `dnssd`, `ipp`, `ipps`, `socket`, `lpd`, `serial`.
 

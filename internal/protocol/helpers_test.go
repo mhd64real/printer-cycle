@@ -2,9 +2,15 @@ package protocol_test
 
 import (
 	"context"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/mhd64real/printer-cycle/internal/ipp"
+	"github.com/mhd64real/printer-cycle/internal/protocol"
+	"github.com/mhd64real/printer-cycle/internal/store"
 )
 
 // shortSocketPath returns a temporary socket path brief enough for the kernel.
@@ -35,3 +41,24 @@ func writeFile(path string) error {
 }
 
 func ctx() context.Context { return context.Background() }
+
+// cupsBackedServer is a protocol server wired to the development CUPS.
+func cupsBackedServer(t *testing.T) (string, *store.DB) {
+	t.Helper()
+
+	cups, err := ipp.New(skipWithoutCUPS(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "printer-cycle.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	s := protocol.NewServer(db, protocol.Options{Logger: quietLogger(), CUPS: cups})
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http") + protocol.ConnectorPath, db
+}

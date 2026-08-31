@@ -24,6 +24,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/mhd64real/printer-cycle/internal/connauth"
+	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 	"github.com/mhd64real/printer-cycle/internal/store"
 	"github.com/mhd64real/printer-cycle/internal/version"
@@ -45,8 +46,17 @@ const DefaultTCPAddr = "0.0.0.0:6310"
 
 // Server accepts connector connections.
 type Server struct {
-	db  *store.DB
-	log *slog.Logger
+	db   *store.DB
+	cups *ipp.Client
+	log  *slog.Logger
+
+	// discovering serialises device discovery across every connector.
+	//
+	// Discovery makes the SNMP backend broadcast across the subnet. Several
+	// connectors discovering at once would multiply that across the network for
+	// no gain, since they would all be asking the same question of the same
+	// machine. Callers wait, bounded by their own context.
+	discovering sync.Mutex
 
 	mu    sync.Mutex
 	conns map[*conn]struct{}
@@ -56,6 +66,10 @@ type Server struct {
 type Options struct {
 	// Logger receives connection events. Defaults to slog.Default().
 	Logger *slog.Logger
+
+	// CUPS is the printing system. Methods that need it fail cleanly when it is
+	// absent, which is what lets most of the protocol be tested without one.
+	CUPS *ipp.Client
 }
 
 // NewServer builds a server. It does not listen until Serve is called.
@@ -66,6 +80,7 @@ func NewServer(db *store.DB, opts Options) *Server {
 	}
 	return &Server{
 		db:    db,
+		cups:  opts.CUPS,
 		log:   log,
 		conns: make(map[*conn]struct{}),
 	}
@@ -205,6 +220,7 @@ type conn struct {
 	rpc       *jsonrpc.Conn
 	challenge *connauth.Challenge
 	db        *store.DB
+	server    *Server
 	log       *slog.Logger
 
 	mu        sync.Mutex
@@ -242,6 +258,7 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 		ws:        ws,
 		challenge: challenge,
 		db:        s.db,
+		server:    s,
 		log:       s.log.With("remote", r.RemoteAddr),
 	}
 	s.track(c)
@@ -293,6 +310,8 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.register(ctx, params)
 	case "users.list":
 		return c.usersList(ctx)
+	case "printers.discover":
+		return c.printersDiscover(ctx, params)
 	}
 
 	// Unreachable: authorise refuses anything absent from the permission table,

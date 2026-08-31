@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/protocol"
 	"github.com/mhd64real/printer-cycle/internal/store"
 	"github.com/mhd64real/printer-cycle/internal/version"
@@ -35,6 +36,8 @@ func run() error {
 		dataDir     = flag.String("data-dir", defaultDataDir(), "where the database and setup token live")
 		listenAddr  = flag.String("listen", protocol.DefaultTCPAddr, "address to serve the connector protocol on")
 		socketPath  = flag.String("socket", "", "additional unix socket for connectors on this machine")
+		cupsAddr    = flag.String("cups", defaultCUPS(), "how to reach CUPS: a unix:// socket or an http:// address")
+		logLevel    = flag.String("log-level", "info", "debug, info, warn, or error")
 	)
 	flag.Parse()
 
@@ -48,7 +51,10 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log := slog.Default()
+	log, err := newLogger(*logLevel)
+	if err != nil {
+		return err
+	}
 
 	db, err := store.Open(filepath.Join(*dataDir, "printer-cycle.db"))
 	if err != nil {
@@ -73,9 +79,15 @@ func run() error {
 		addrs = append(addrs, *socketPath)
 	}
 
-	log.Info("printer-cycle core starting", "version", version.Version, "data", *dataDir)
+	cups, err := ipp.New(*cupsAddr)
+	if err != nil {
+		return err
+	}
 
-	server := protocol.NewServer(db, protocol.Options{Logger: log})
+	log.Info("printer-cycle core starting",
+		"version", version.Version, "data", *dataDir, "cups", *cupsAddr)
+
+	server := protocol.NewServer(db, protocol.Options{Logger: log, CUPS: cups})
 	if err := server.Serve(ctx, addrs...); err != nil {
 		return err
 	}
@@ -120,4 +132,29 @@ func defaultDataDir() string {
 		return dir
 	}
 	return "/var/lib/printer-cycle"
+}
+
+// defaultCUPS is cupsd's own socket, which is how core reaches it in
+// production: peer credentials identify core as a member of the lpadmin group,
+// so no password exists anywhere. Development points this at a container over
+// TCP instead, which is the same protocol on a different transport.
+func defaultCUPS() string {
+	if addr := os.Getenv("PRINTER_CYCLE_CUPS"); addr != "" {
+		return addr
+	}
+	return "unix:///run/cups/cups.sock"
+}
+
+// newLogger produces structured output on stderr.
+//
+// Not slog.Default(), which routes through the standard log package and emits
+// prose rather than key-value pairs. This runs as a service, so its output is
+// read by journald and by whatever an operator greps with, and structure is
+// what makes that possible.
+func newLogger(level string) (*slog.Logger, error) {
+	var l slog.Level
+	if err := l.UnmarshalText([]byte(level)); err != nil {
+		return nil, fmt.Errorf("log level %q is not one of debug, info, warn, error", level)
+	}
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: l})), nil
 }

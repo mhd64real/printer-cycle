@@ -855,7 +855,31 @@ dashboard". Both halves were wrong:
 ### Stage 32: printers.discover and printer.discovered
 - Wire the streaming discovery from Stage 14 to progressive notifications.
 - **Done when:** a client sees devices arrive one at a time.
-- **Status:** todo
+- **Status:** done, 2026-08-31, tested under `-race` against a real cupsd:
+
+```
+t=2.07s   dnssd://Virtual%20Office%20Printer._printer._tcp.local/
+t=3.09s   dnssd://Virtual%20Office%20Printer._ipps._tcp.local/?uuid=415411ea-...
+t=3.09s   ipps://Virtual%20Office%20Printer._ipps._tcp.local/
+```
+
+  The test reads raw frames and separates notifications from the reply by hand, the way a connector
+  actually has to, and asserts the announced set and the returned set agree.
+- **`driverless` removed from PROTOCOL.md section 7b.** The draft carried a boolean saying whether a
+  device speaks IPP Everywhere and needs no driver. **CUPS cannot say.** `CUPS-Get-Devices` names no
+  backend and exposes no such attribute, so the field could only ever have been guessed from the URI
+  scheme, which is a fabrication dressed as a fact. Whether a device needs a driver is answered by
+  `printers.driverCandidates`, from real data, in one place.
+- **Discovery is serialised across the whole box.** It makes the SNMP backend broadcast across the
+  subnet, and several connectors discovering at once would multiply that across the network while all
+  asking the same machine the same question. A connector in a loop cannot flood the LAN. Callers wait
+  bounded by their own context, and a caller that gives up does not leak the goroutine waiting for the
+  lock.
+- **Core logs structured output now.** `slog.Default()` routes through the standard log package and
+  emits prose rather than key-value pairs, which is wrong for something journald collects and an
+  operator greps. Noticed because a grep for `msg=` found nothing in the real binary's output while
+  the same pattern worked in tests. Added `--log-level` too, since the code already had debug lines
+  nothing could ever show.
 
 ### Stage 33: printers.probe
 - Resolve a bare address by trying 631, then 9100, then 515, plus SNMP for the model string.
@@ -1285,3 +1309,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-31, after Stage 31:** implemented `users.list` a stage early, because scope enforcement
   with no scoped method to enforce against would have been tested against nothing. Added it to
   PROTOCOL.md as section 7c.
+- **2026-08-31, after Stage 32:** removed `driverless` from the discovery response in PROTOCOL.md,
+  because CUPS does not report it and the field could only have been guessed. Switched core to
+  structured logging with a level flag, having noticed the default logger emits prose.

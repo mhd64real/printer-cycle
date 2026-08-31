@@ -832,7 +832,25 @@ dashboard". Both halves were wrong:
   intended correspondence is recorded in the doc comment on `internal/ipp/errors.go`.
 - **Done when:** a connector holding only `jobs.submit` is refused `printers.manage` with code
   -32001, and an IPP not-found from a printer operation reaches the connector as -32003.
-- **Status:** todo
+- **Status:** done, 2026-08-31, tested under `-race`.
+- **The permission table is the only place a method becomes callable.** A method absent from it does
+  not exist, whatever handler somebody wrote. That makes adding a method require a decision about what
+  it costs, rather than making the decision optional. A test asserts every scope named in the table is
+  one core actually recognises, and the dispatcher logs an internal error if a permitted method turns
+  out to have no handler.
+- **One gate ahead of every handler.** Authentication, existence and permission are decided in a
+  single place, so no handler can be reached by forgetting a check inside it.
+- **Refusals name the scope required**, in the error's data. That tells a connector author exactly
+  what to ask an administrator for, and reveals nothing, since the caller already knows what it tried.
+- **`users.list` implemented as the first scoped method**, so enforcement has something real to
+  enforce against instead of being tested in the abstract. Added to PROTOCOL.md as section 7c.
+- **The Stage 12 deferral is resolved.** The same IPP not-found becomes -32003 or -32004 depending on
+  what the caller asked about, which is exactly the context the IPP package does not have and this
+  layer does. Tested by translating one error object two ways and getting two codes.
+- **A CUPS permission failure is deliberately NOT reported as a scope problem.** CUPS refusing core
+  almost always means core is not in the `lpadmin` group, which is an operator problem. Reporting
+  -32001 would send a connector author hunting for a permission they cannot grant and do not need, so
+  it becomes an internal error and a log line naming the likely cause.
 
 ### Stage 32: printers.discover and printer.discovered
 - Wire the streaming discovery from Stage 14 to progressive notifications.
@@ -1264,3 +1282,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   secrets are never returned to any client, which would have made them useless, since a connector
   needs its own credentials to function. It also claimed encryption that had nowhere to keep a key.
   Both replaced with what is actually true and actually enforced.
+- **2026-08-31, after Stage 31:** implemented `users.list` a stage early, because scope enforcement
+  with no scoped method to enforce against would have been tested against nothing. Added it to
+  PROTOCOL.md as section 7c.

@@ -393,6 +393,26 @@ back out to phones. Same word, opposite directions. Keep them distinct in copy a
 
 ---
 
+## 7c. Users (PROPOSED)
+
+**users.list** returns the accounts on this box. Requires `users.read`.
+
+```json
+{"jsonrpc":"2.0","id":20,"method":"users.list"}
+```
+
+```json
+{"result":{"users":[
+  {"id":"user_01K7...","username":"mohamed","display_name":"Mohamed","is_admin":true,
+   "created_at":"2026-08-31T00:44:12Z"}
+]}}
+```
+
+Password hashes never appear in any response. Not because argon2id hashes are directly usable, but
+because there is no reason for one to leave the process that stores it.
+
+---
+
 ## 8. Identity linking (PROPOSED)
 
 Every connector login flow anyone will ever write ends in the same place: binding an external

@@ -280,18 +280,25 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 	if method == "authenticate" {
 		return c.authenticate(ctx, params)
 	}
-	if c.authenticated() == nil {
-		return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated,
-			"authenticate before calling %s", method)
+
+	// One gate, ahead of every handler. Authentication, existence and permission
+	// are all decided here, so no handler can be reached by forgetting to check
+	// something inside it.
+	if err := c.authorise(method); err != nil {
+		return nil, err
 	}
 
 	switch method {
 	case "register":
 		return c.register(ctx, params)
+	case "users.list":
+		return c.usersList(ctx)
 	}
 
-	// The rest of the method set arrives from Stage 32 onwards.
-	return nil, jsonrpc.Errorf(jsonrpc.CodeMethodNotFound, "no method %q", method)
+	// Unreachable: authorise refuses anything absent from the permission table,
+	// so arriving here means a method was listed there and never wired up.
+	c.log.Error("a permitted method has no handler", "method", method)
+	return nil, jsonrpc.Errorf(jsonrpc.CodeInternalError, "internal error")
 }
 
 // register records what a connector says about itself and returns its current

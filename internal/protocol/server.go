@@ -312,6 +312,8 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.usersList(ctx)
 	case "printers.discover":
 		return c.printersDiscover(ctx, params)
+	case "printers.probe":
+		return c.printersProbe(ctx, params)
 	}
 
 	// Unreachable: authorise refuses anything absent from the permission table,

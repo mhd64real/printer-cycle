@@ -337,13 +337,15 @@ func TestDiscoveryIsProgressive(t *testing.T) {
 	}
 	t.Logf("discovery finished in %v", total.Round(10*time.Millisecond))
 
-	if len(arrivals) > 1 {
-		spread := arrivals[len(arrivals)-1].at - arrivals[0].at
-		if spread < 100*time.Millisecond {
-			t.Errorf("all %d devices arrived within %v of one another; that is a batch, not a stream",
-				len(arrivals), spread.Round(time.Millisecond))
-		}
-	}
+	// No assertion about the spread between arrivals here, deliberately.
+	//
+	// An earlier version required them to be spread over time and was flaky:
+	// when CUPS finds two devices at nearly the same moment they are delivered
+	// at nearly the same moment, which is correct behaviour failing an
+	// assertion about it. Progressive delivery is proven deterministically in
+	// TestDiscoveryEmitsBeforeTheResponseEnds, against a server that pauses
+	// mid-stream on purpose. What this test is for is that discovery works
+	// against a real cupsd at all.
 
 	// The collected form is built on the streaming form, so it must also work.
 	//

@@ -884,7 +884,56 @@ t=3.09s   ipps://Virtual%20Office%20Printer._ipps._tcp.local/
 ### Stage 33: printers.probe
 - Resolve a bare address by trying 631, then 9100, then 515, plus SNMP for the model string.
 - **Done when:** giving it the container's address returns a usable device URI and a model.
-- **Status:** todo
+- **Status:** done, 2026-08-31:
+
+```
+uri=ipp://127.0.0.1:8632/ipp/print   model="Example Printer"   transport=ipp
+```
+
+  An address in, something printable out, with the printer naming itself. That is what turns a typed
+  address into one-click pairing instead of a list of eighteen thousand drivers to scroll through.
+- **Ports are probed concurrently**, not in turn, so an address with nothing behind it costs one
+  timeout rather than three.
+- **IPP is tried first, ahead of lower-numbered ports.** A printer that speaks it can say what it is;
+  JetDirect and LPD work but reveal nothing about themselves.
+- **Something listening that will not describe itself is still returned as usable**, with the model
+  left empty and the user picking a driver by hand. Refusing it would rule out every old printer,
+  which is the hardware this project exists for.
+- The virtual printer container is now published on the host, so probing is tested against a genuine
+  IPP printer rather than against cupsd, which is a print server and answers quite differently.
+- **`make dev-up` now creates the queues as well.** They were separate, so rebuilding the containers
+  left an environment with no queues and a test run failing for reasons that looked nothing like the
+  cause. Which is exactly what happened during this stage.
+
+**A flaky test I wrote, and did not fix by loosening it.** Both discovery tests asserted that devices
+arrive spread over time. That depends on how quickly CUPS happens to find things: when it finds two at
+nearly the same moment they are delivered at nearly the same moment, which is correct behaviour
+failing an assertion about it. It passed for two stages and then failed.
+
+The fix was to move the timing assertion somewhere deterministic rather than to delete it. A new test
+in the ipp package serves a hand-built IPP response through an httptest server that pauses mid-stream
+on purpose, and asserts the first device reaches the caller before the response closes:
+
+```
+device 1 at 450ms of 610ms
+device 2 at 450ms of 610ms
+device 3 at 610ms of 610ms
+```
+
+  The two integration tests keep every correctness assertion and no longer guess at CUPS's scheduling.
+
+### Stage 33b: Identify legacy printers over SNMP (ADDED 2026-08-31)
+- Probing identifies a printer by asking it over IPP, which works for anything made this decade and
+  not at all for the JetDirect and LPD printers that answer on 9100 and 515. Those say nothing about
+  themselves over their print port, and SNMP is the only way to ask.
+- **This matters more than it sounds.** An old network laser is precisely the hardware printer-cycle
+  exists for, and without its make and model there is no automatic driver selection: the user is
+  handed the driver list this project was built to avoid.
+- Needs a minimal SNMP GET for the printer MIB (`sysDescr`, `hrDeviceDescr`, `prtGeneralPrinterName`),
+  either hand-rolled or via a library. Deferred rather than done because **it cannot be tested without
+  real hardware or a simulated SNMP printer agent**, the same gap already recorded against Stage 13.
+- **Done when:** an address answering only on 9100 yields a make and model.
+- **Status:** blocked, pairs with Phase 9
 
 ### Stage 34: printers.add and printers.remove
 - Pairing, with `ppd: null` meaning use the top-ranked candidate.
@@ -1312,3 +1361,8 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-08-31, after Stage 32:** removed `driverless` from the discovery response in PROTOCOL.md,
   because CUPS does not report it and the field could only have been guessed. Switched core to
   structured logging with a level flag, having noticed the default logger emits prose.
+- **2026-08-31, after Stage 33:** added Stage 33b for SNMP identification of legacy printers, blocked
+  on hardware. IPP identification covers modern printers; the old network lasers this project targets
+  answer on 9100 or 515 and say nothing about themselves, so without SNMP they get no automatic driver
+  selection. Also fixed a flake I had introduced two stages earlier by asserting on CUPS's internal
+  timing, moving that assertion to a synthetic stream instead of removing it.

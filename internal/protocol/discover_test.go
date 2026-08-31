@@ -101,10 +101,15 @@ func TestDiscoveryArrivesProgressively(t *testing.T) {
 			len(reply.Result.Devices), len(notified))
 	}
 
-	// Announced before the reply, which is what "progressive" means here.
-	if spread := notified[len(notified)-1].at - notified[0].at; len(notified) > 1 && spread < 100*time.Millisecond {
-		t.Errorf("every device was announced within %v of the others; that is a batch, not a stream", spread)
-	}
+	// No assertion about the spread between announcements, deliberately.
+	//
+	// It depends on how quickly CUPS happens to find things, and two devices
+	// found at nearly the same moment are announced at nearly the same moment,
+	// which is right behaviour failing an assertion about it. That progressive
+	// delivery happens at all is proven deterministically by
+	// TestDiscoveryEmitsBeforeTheResponseEnds in the ipp package, against a
+	// server that pauses mid-stream on purpose. What matters here is that every
+	// device found is announced, and that the announcements and the reply agree.
 }
 
 func TestDiscoveryNeedsThePrintersReadScope(t *testing.T) {

@@ -66,11 +66,22 @@ clean:
 # Development environment: CUPS in a container, reachable on 127.0.0.1:6631.
 # 6631 rather than 631 because macOS runs its own cupsd on 631.
 
+# Brings up the containers AND creates the virtual queues.
+#
+# The two used to be separate, which meant a rebuild silently left an
+# environment with no queues in it and a test run that failed for reasons
+# looking nothing like the cause.
 dev-up:
 	docker compose -f dev/compose.yml up -d --build
+	@printf 'waiting for cupsd'
+	@for i in $$(seq 1 60); do \
+		if curl -sf -o /dev/null http://127.0.0.1:6631/; then echo " ready"; break; fi; \
+		printf '.'; sleep 1; \
+	done
+	@$(MAKE) --no-print-directory dev-printers
 
 dev-printers:
-	docker exec printer-cycle-cups /usr/local/bin/create-printers.sh
+	@docker exec printer-cycle-cups /usr/local/bin/create-printers.sh
 
 dev-down:
 	docker compose -f dev/compose.yml down

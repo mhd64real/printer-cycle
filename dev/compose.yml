@@ -24,6 +24,10 @@ services:
     image: printer-cycle-dev-cups
     container_name: printer-cycle-virtual-printer
     command: ["/usr/local/bin/entrypoint-printer.sh"]
+    # Published so probing can be tested against a genuine IPP printer rather
+    # than against cupsd, which is a print server and answers quite differently.
+    ports:
+      - "127.0.0.1:8632:8632"
     depends_on:
       - cups
     restart: unless-stopped

@@ -33,6 +33,9 @@ var methodScopes = map[string]string{
 	"printers.driverCandidates": store.ScopePrintersRead,
 	"printers.add":              store.ScopePrintersManage,
 	"printers.remove":           store.ScopePrintersManage,
+
+	"jobs.submit": store.ScopeJobsSubmit,
+	"jobs.commit": store.ScopeJobsSubmit,
 }
 
 // requiredScope reports the scope a method needs, and whether it exists at all.

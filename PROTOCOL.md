@@ -71,6 +71,15 @@ Documents never travel inside JSON. Base64 inflates by a third and forces the wh
 memory, which on a 512MB Pi Zero 2 W sharing RAM with Ghostscript is how you get an OOM kill.
 Chunks stream. 64KB is the recommended chunk size.
 
+**No single frame may exceed 4MB**, text or binary. That bounds one frame, not one document: a
+document is as many frames as it needs. The limit exists so a hostile connector cannot make core
+allocate without bound, and a frame beyond it closes the connection.
+
+**Added 2026-08-31.** The draft named a recommended chunk size and no maximum, which left every
+connector author to guess and left core with its WebSocket library's default limit of 32KB, smaller
+than the recommended chunk. A connector following the recommendation would have been disconnected
+mid-document for a reason appearing nowhere in this document.
+
 ---
 
 ## 3. JSON-RPC shape (SETTLED)

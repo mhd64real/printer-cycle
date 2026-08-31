@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/protocol"
@@ -103,4 +104,31 @@ func uniqueName(t *testing.T) string {
 	t.Helper()
 	name := strings.NewReplacer("/", " ", "_", " ").Replace(t.Name())
 	return "pctest " + name
+}
+
+// authedClientWithTimeout is authedClient with room for a long transfer.
+func authedClientWithTimeout(t *testing.T, url string, db *store.DB, id string,
+	scopes []string, timeout time.Duration) *client {
+	t.Helper()
+
+	key := enrolledConnector(t, db, id, scopes)
+	c := dialWithTimeout(t, url, timeout)
+	if resp := c.call("authenticate", map[string]any{
+		"connector_id": id, "proof": c.proof(key),
+	}); resp.Error != nil {
+		t.Fatalf("authenticating %s: %v", id, resp.Error)
+	}
+	return c
+}
+
+// removeQueue deletes a queue through the container.
+//
+// Not through the protocol, deliberately. A test that fails with a broken
+// connection cannot make any more calls, so cleanup that went that way silently
+// did nothing and left the queue behind. The next run then modified that stale
+// queue instead of creating a fresh one, and failed in a way that looked like a
+// driver bug. Cleanup has to work when the thing being tested does not.
+func removeQueue(t *testing.T, queue string) {
+	t.Helper()
+	_ = exec.Command("docker", "exec", "printer-cycle-cups", "lpadmin", "-x", queue).Run()
 }

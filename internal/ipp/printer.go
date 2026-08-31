@@ -60,6 +60,12 @@ type Printer struct {
 	StateReasons  []string
 	AcceptingJobs bool
 	Markers       []Marker
+
+	// Formats is document-format-supported: the MIME types this queue will
+	// accept. Worth checking before submitting, because CUPS 2.4 accepts a job
+	// whose format it cannot filter, reports it completed successfully, and
+	// prints nothing at all.
+	Formats []string
 }
 
 // printerFields is what we ask CUPS for when listing queues.
@@ -78,6 +84,7 @@ var printerFields = []string{
 	"marker-colors",
 	"marker-types",
 	"marker-levels",
+	"document-format-supported",
 }
 
 // Printers lists every queue configured in CUPS.
@@ -132,6 +139,7 @@ func parsePrinter(attrs goipp.Attributes) Printer {
 		StateReasons:  strs(attrs, "printer-state-reasons"),
 		AcceptingJobs: accepting,
 		Markers:       parseMarkers(attrs),
+		Formats:       strs(attrs, "document-format-supported"),
 	}
 }
 

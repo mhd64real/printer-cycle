@@ -985,7 +985,49 @@ names chosen never to be implemented.
   `document-format-supported`, so a connector gets an error instead of a user getting silence.
 - **Done when:** a 50MB file prints without core's memory rising meaningfully, and an unsupported
   document format is refused rather than silently discarded.
-- **Status:** todo
+- **Status:** done, 2026-08-31. Both halves:
+
+```
+sent 50 MB through the protocol, peak heap growth 3.8 MB
+refused: application/vnd.cups-raw is accepted by CUPS and then discarded without printing
+```
+
+- **The document is never assembled anywhere.** Chunks arrive as binary frames and go straight into a
+  pipe a goroutine is reading into CUPS. Writing happens on the connection's read loop, so a slow
+  printer stops core reading from that connector and TCP carries the backpressure to the connector's
+  own writes. A document arrives no faster than the printer can take it, and nothing queues in memory
+  to disguise that.
+- **Length and checksum are verified before the pipe is closed**, so a truncated upload never reaches
+  the printer at all rather than being cancelled halfway through printing.
+- **A connector that disconnects mid-document has its stream abandoned and its job marked aborted**,
+  rather than leaving a pipe, a goroutine and a half-sent job in CUPS.
+
+**Three findings, each of which would have broken real use.**
+
+**The WebSocket read limit was 32KB**, the library's default, while the specification recommends 64KB
+chunks. A connector following the recommendation would have been disconnected mid-document for a
+reason appearing nowhere in the protocol. The 50MB test hung for five minutes before this surfaced.
+Core now accepts frames up to 4MB and **PROTOCOL.md states a maximum**, which it previously did not:
+naming a recommended size and no limit left every connector author guessing.
+
+**Format validation is not enough on its own.** CUPS lists `application/vnd.cups-raw` in
+`document-format-supported` and then throws such jobs away, reporting success. Checking the supported
+list therefore passes exactly the case the check was added for. There is now an explicit refusal for
+the formats measured to be silently discarded, alongside the supported-list check.
+
+**Queue sharing is derived rather than configured.** CUPS refuses print jobs from a remote client to
+an unshared queue, and printer-cycle deliberately creates queues unshared so CUPS does not advertise
+printers the connectors already advertise. Core reaching CUPS over a Unix socket is local and keeps
+them unshared; core reaching it across a network shares them, because otherwise nothing it creates
+could ever be printed to. Core knows which it is, so it decides, rather than asking an operator to
+know this.
+
+**And two test-infrastructure problems worth recording, because both produced failures that looked
+like code bugs.** Cleanup ran through the protocol connection, so a test dying with a broken
+connection left its queue behind, and the next run modified that stale queue instead of creating a
+fresh one; cleanup now goes through the container and works when the thing under test does not. And
+`go test ./...` runs packages in parallel, so two packages pushing documents through one shared cupsd
+starved each other; integration tests now run one package at a time.
 
 ### Stage 36: jobs.commit, integrity, and timeouts
 - Verify length and SHA-256, discard abandoned streams.
@@ -1408,3 +1450,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   lists the result. Recorded that CUPS hides unshared printers from remote clients, which affects any
   deployment pointing core at CUPS on another machine. Learned to stop writing tests that assert a
   feature does not exist yet.
+- **2026-08-31, after Stage 35:** PROTOCOL.md gained a maximum frame size, which it had never
+  specified. Added an explicit refusal list for formats CUPS advertises and silently discards, since
+  checking the supported list passes the exact case the check exists for. Queue sharing is now derived
+  from whether CUPS is local. Integration tests run one package at a time, and test cleanup no longer
+  depends on the connection under test still working.

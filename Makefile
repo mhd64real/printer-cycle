@@ -51,8 +51,13 @@ test:
 # which has no container to talk to.
 DEV_CUPS ?= http://127.0.0.1:6631
 
+# -p 1 runs one package at a time.
+#
+# The integration tests share a single CUPS container, and Go runs packages in
+# parallel by default. Two packages pushing documents through the same cupsd
+# starve each other and fail on timeouts that look like bugs in the code.
 test-integration:
-	PRINTER_CYCLE_TEST_CUPS=$(DEV_CUPS) $(GO) test ./... -count=1 -v
+	PRINTER_CYCLE_TEST_CUPS=$(DEV_CUPS) $(GO) test ./... -count=1 -p 1 -v
 
 # What the event loop costs while nothing is happening. Idles for a minute on
 # purpose, so it is not part of the ordinary test run.

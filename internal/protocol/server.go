@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -36,6 +37,15 @@ const ProtocolVersion = "v1"
 
 // ConnectorPath is where connectors connect.
 const ConnectorPath = "/" + ProtocolVersion + "/connector"
+
+// MaxFrameSize is the largest single frame core will accept.
+//
+// It bounds one message, not one document: documents arrive as many binary
+// frames, and the specification recommends 64KB each. The limit is generous
+// enough that no reasonable connector meets it and small enough that a hostile
+// one cannot make core allocate without bound. A frame beyond it closes the
+// connection, which is what a limit is for.
+const MaxFrameSize = 4 << 20
 
 // DefaultTCPAddr is the address core listens on for connectors.
 //
@@ -225,6 +235,10 @@ type conn struct {
 
 	mu        sync.Mutex
 	connector *store.Connector // nil until authenticated
+
+	streamMu      sync.Mutex
+	streams       map[uint32]*stream
+	streamCounter atomic.Uint32
 }
 
 // authTimeout is how long a connection has to authenticate before it is closed.
@@ -247,6 +261,12 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Document chunks arrive as binary frames, and the library's default limit
+	// is 32KB, which is smaller than any sensible chunk. Without raising it, a
+	// connector sending a document is disconnected mid-transfer for a reason
+	// that appears nowhere in the protocol.
+	ws.SetReadLimit(MaxFrameSize)
+
 	challenge, err := connauth.NewChallenge()
 	if err != nil {
 		s.log.Error("cannot create an authentication challenge", "error", err)
@@ -266,7 +286,8 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	c.rpc = jsonrpc.New(&wsTransport{ws: ws, log: c.log}, c)
+	c.rpc = jsonrpc.New(&wsTransport{ws: ws, log: c.log, onBinary: c.writeChunk}, c)
+	defer c.closeStreams()
 
 	if err := c.sendHello(ctx); err != nil {
 		c.log.Warn("cannot greet connector", "error", err)
@@ -322,6 +343,10 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.printersAdd(ctx, params)
 	case "printers.remove":
 		return c.printersRemove(ctx, params)
+	case "jobs.submit":
+		return c.jobsSubmit(ctx, params)
+	case "jobs.commit":
+		return c.jobsCommit(ctx, params)
 	}
 
 	// Unreachable: authorise refuses anything absent from the permission table,
@@ -468,8 +493,9 @@ func (c *conn) authenticated() *store.Connector {
 // rather than an inefficiency. They are routed away here so the message layer
 // only ever sees messages.
 type wsTransport struct {
-	ws  *websocket.Conn
-	log *slog.Logger
+	ws       *websocket.Conn
+	log      *slog.Logger
+	onBinary func([]byte)
 }
 
 func (t *wsTransport) ReadMessage(ctx context.Context) ([]byte, error) {
@@ -481,11 +507,10 @@ func (t *wsTransport) ReadMessage(ctx context.Context) ([]byte, error) {
 		if kind == websocket.MessageText {
 			return data, nil
 		}
-		// Document streaming is Stage 35. Until then a binary frame is a
-		// connector doing something core cannot yet honour, and dropping the
-		// connection over it would be worse than saying so and carrying on.
-		t.log.Warn("ignoring a binary frame: document streaming is not implemented yet",
-			"bytes", len(data))
+		// Document data, routed away from the message layer entirely. It never
+		// travels inside JSON: base64 would inflate it by a third and force the
+		// whole file into memory.
+		t.onBinary(data)
 	}
 }
 

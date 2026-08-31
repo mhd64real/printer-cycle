@@ -47,6 +47,15 @@ type Client struct {
 	// within a connection, so a counter is enough.
 	nextID atomic.Uint32
 
+	// local records whether cupsd is reached over its own Unix socket.
+	//
+	// It decides more than it looks like it should. CUPS refuses print jobs
+	// from a remote client to a queue that is not shared, so a core talking to
+	// CUPS across a network has to share the queues it creates, while one on
+	// the same machine must not: sharing would have CUPS advertise a printer
+	// the connectors are already advertising.
+	local bool
+
 	// requests counts exchanges attempted. Background loops that run forever
 	// are easy to get wrong, and this makes the cost of one observable rather
 	// than a matter of opinion.
@@ -55,6 +64,10 @@ type Client struct {
 
 // Requests reports how many IPP exchanges this client has attempted.
 func (c *Client) Requests() uint64 { return c.requests.Load() }
+
+// Local reports whether cupsd is reached over its own Unix socket, which CUPS
+// treats differently from a network connection. See the local field.
+func (c *Client) Local() bool { return c.local }
 
 // New builds a client for a CUPS endpoint. Two forms are accepted:
 //
@@ -89,6 +102,7 @@ func New(endpoint string) (*Client, error) {
 			// present and valid. "localhost" keeps generated URIs readable.
 			endpoint:  &url.URL{Scheme: "http", Host: "localhost"},
 			authority: "localhost",
+			local:     true,
 		}
 		return c, nil
 

@@ -195,10 +195,19 @@ func (c *conn) printersAdd(ctx context.Context, params json.RawMessage) (any, er
 		PPDName:   record.PPDName,
 		Info:      record.DisplayName,
 		Location:  record.Location,
-		// Not shared. printer-cycle publishes printers through connectors, and
-		// letting CUPS advertise them too would put one physical printer on the
-		// network twice under two identities from the same box.
-		Shared: false,
+
+		// Sharing is derived, not configured.
+		//
+		// Unshared is what we want: printer-cycle publishes printers through
+		// connectors, and letting CUPS advertise them too would put one
+		// physical printer on the network twice, under two identities, from the
+		// same box.
+		//
+		// But CUPS refuses print jobs from a remote client to an unshared
+		// queue, so a core reaching CUPS across a network must share or nothing
+		// it creates can ever be printed to. Core knows which situation it is
+		// in, so it decides rather than asking an operator to know this.
+		Shared: !c.server.cups.Local(),
 	})
 	if err != nil {
 		// Undo the reservation so a failed attempt does not consume the name the

@@ -116,7 +116,7 @@ func TestTwoPrintersMayShareAName(t *testing.T) {
 			t.Fatal(err)
 		}
 		queues = append(queues, added.QueueName)
-		t.Cleanup(func() { c.call("printers.remove", map[string]any{"id": added.ID}) })
+		t.Cleanup(func() { removeQueue(t, added.QueueName) })
 	}
 
 	if queues[0] == queues[1] {
@@ -206,13 +206,14 @@ func TestAutomaticChoiceAvoidsProprietaryPlugins(t *testing.T) {
 		t.Fatal(resp.Error)
 	}
 	var added struct {
-		ID  string `json:"id"`
-		PPD string `json:"ppd"`
+		ID        string `json:"id"`
+		PPD       string `json:"ppd"`
+		QueueName string `json:"queue_name"`
 	}
 	if err := json.Unmarshal(resp.Result, &added); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { c.call("printers.remove", map[string]any{"id": added.ID}) })
+	t.Cleanup(func() { removeQueue(t, added.QueueName) })
 
 	if strings.Contains(added.PPD, "hpcups") {
 		t.Errorf("chose %s, which needs a closed vendor plugin that cannot run on ARM", added.PPD)

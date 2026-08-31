@@ -30,9 +30,13 @@ type client struct {
 }
 
 func dial(t *testing.T, url string) *client {
+	return dialWithTimeout(t, url, 15*time.Second)
+}
+
+func dialWithTimeout(t *testing.T, url string, timeout time.Duration) *client {
 	t.Helper()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(cancel)
 
 	ws, _, err := websocket.Dial(ctx, url, nil)

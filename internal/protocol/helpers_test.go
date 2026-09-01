@@ -132,3 +132,29 @@ func removeQueue(t *testing.T, queue string) {
 	t.Helper()
 	_ = exec.Command("docker", "exec", "printer-cycle-cups", "lpadmin", "-x", queue).Run()
 }
+
+// cupsBackedServerWithIdle is cupsBackedServer with a short stream idle period,
+// so abandonment can be observed without waiting a minute for it.
+func cupsBackedServerWithIdle(t *testing.T, idle time.Duration) (string, *store.DB) {
+	t.Helper()
+
+	cups, err := ipp.New(skipWithoutCUPS(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "printer-cycle.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	s := protocol.NewServer(db, protocol.Options{
+		Logger:     quietLogger(),
+		CUPS:       cups,
+		StreamIdle: idle,
+	})
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http") + protocol.ConnectorPath, db
+}

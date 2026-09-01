@@ -60,6 +60,10 @@ type Server struct {
 	cups *ipp.Client
 	log  *slog.Logger
 
+	// streamIdle is how long a document stream may go untouched. Zero means the
+	// default; tests set it short so abandonment can be observed.
+	streamIdle time.Duration
+
 	// discovering serialises device discovery across every connector.
 	//
 	// Discovery makes the SNMP backend broadcast across the subnet. Several
@@ -80,6 +84,10 @@ type Options struct {
 	// CUPS is the printing system. Methods that need it fail cleanly when it is
 	// absent, which is what lets most of the protocol be tested without one.
 	CUPS *ipp.Client
+
+	// StreamIdle overrides how long a document stream may go untouched before
+	// it is abandoned. Zero uses [DefaultStreamIdle].
+	StreamIdle time.Duration
 }
 
 // NewServer builds a server. It does not listen until Serve is called.
@@ -89,10 +97,11 @@ func NewServer(db *store.DB, opts Options) *Server {
 		log = slog.Default()
 	}
 	return &Server{
-		db:    db,
-		cups:  opts.CUPS,
-		log:   log,
-		conns: make(map[*conn]struct{}),
+		db:         db,
+		cups:       opts.CUPS,
+		streamIdle: opts.StreamIdle,
+		log:        log,
+		conns:      make(map[*conn]struct{}),
 	}
 }
 
@@ -288,6 +297,10 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 
 	c.rpc = jsonrpc.New(&wsTransport{ws: ws, log: c.log, onBinary: c.writeChunk}, c)
 	defer c.closeStreams()
+
+	reapCtx, stopReaper := context.WithCancel(ctx)
+	defer stopReaper()
+	go c.reapStreams(reapCtx)
 
 	if err := c.sendHello(ctx); err != nil {
 		c.log.Warn("cannot greet connector", "error", err)

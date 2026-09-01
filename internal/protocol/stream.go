@@ -22,13 +22,24 @@ import (
 // streamIDSize is the length of the identifier prefixing every binary frame.
 const streamIDSize = 4
 
-// streamIdle is how long a stream may go without a chunk or a commit before it
-// is abandoned.
+// DefaultStreamIdle is how long a stream may go without a chunk or a commit
+// before it is abandoned.
 //
-// Without it, a connector that opens a stream and vanishes leaves a pipe, a
-// goroutine and a half-submitted job in CUPS forever. On a machine with 512MB,
-// a few of those is the whole machine.
-const streamIdle = 60 * time.Second
+// Without it, a connector that opens a stream and then vanishes leaves a pipe, a
+// goroutine and a half-submitted job in CUPS forever. On a machine with 512MB, a
+// few of those is the whole machine.
+//
+// Generous on purpose. A connector reading a large file off a slow disk, or
+// waiting on a user to choose something mid-upload, is doing nothing wrong. This
+// is here to collect the abandoned, not to hurry the slow.
+const DefaultStreamIdle = 60 * time.Second
+
+// streamSweep is how often abandoned streams are looked for.
+//
+// A quarter of the idle period, so a stream is collected within about 25% of it
+// past the deadline. Frequent enough to matter, rare enough that an idle box
+// spends nothing on it.
+const streamSweep = DefaultStreamIdle / 4
 
 // stream is one document being sent to a printer.
 //
@@ -324,6 +335,61 @@ func (c *conn) writeChunk(frame []byte) {
 	s.digest.Write(payload)
 	s.lastAt = time.Now()
 	s.mu.Unlock()
+}
+
+// reapStreams abandons streams nothing has touched for too long.
+//
+// Runs for the life of a connection. A connector that opens a stream and then
+// stops sending, whether it crashed, hung, or simply forgot, would otherwise
+// hold a pipe and a blocked goroutine until the connection itself went away, and
+// a connector that keeps its connection open indefinitely never releases them at
+// all.
+func (c *conn) reapStreams(ctx context.Context) {
+	idle := c.server.streamIdle
+	if idle <= 0 {
+		idle = DefaultStreamIdle
+	}
+	sweep := idle / 4
+	if sweep <= 0 {
+		sweep = time.Millisecond
+	}
+
+	ticker := time.NewTicker(sweep)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		cutoff := time.Now().Add(-idle)
+
+		c.streamMu.Lock()
+		var stale []*stream
+		for id, s := range c.streams {
+			s.mu.Lock()
+			last := s.lastAt
+			s.mu.Unlock()
+
+			if last.Before(cutoff) {
+				stale = append(stale, s)
+				delete(c.streams, id)
+			}
+		}
+		c.streamMu.Unlock()
+
+		// Outside the lock: closing a pipe wakes whoever is blocked on it, and
+		// holding the map while that happens would stop every other stream on
+		// this connection from making progress.
+		for _, s := range stale {
+			c.log.Warn("abandoning a stream nothing has touched",
+				"job", s.jobID, "stream", s.id, "idle", idle)
+			s.writer.CloseWithError(errors.New("the connector stopped sending"))
+			c.failJob(context.WithoutCancel(ctx), s.jobID, "aborted")
+		}
+	}
 }
 
 func (s *stream) abort(err error) {

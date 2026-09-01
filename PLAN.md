@@ -1032,7 +1032,23 @@ starved each other; integration tests now run one package at a time.
 ### Stage 36: jobs.commit, integrity, and timeouts
 - Verify length and SHA-256, discard abandoned streams.
 - **Done when:** a truncated upload is rejected with code -32007 and leaks nothing.
-- **Status:** todo
+- **Status:** done, 2026-09-01, tested under `-race`.
+- **Integrity landed with Stage 35**: length and checksum are verified before the pipe is closed, so a
+  truncated or altered upload never reaches the printer rather than being cancelled halfway through
+  printing.
+- **Timeouts did not, and that is the part worth recording.** Stage 35 left a `streamIdle` constant
+  with a comment explaining exactly why abandoned streams must be collected, and **nothing used it**.
+  A documented protection that does not exist is worse than not claiming one, because the next person
+  reading that comment believes the problem is handled.
+- A reaper now runs for the life of each connection, sweeping every quarter of the idle period. It
+  matters most for the case that is easy to overlook: a connector which **disconnects** is already
+  cleaned up when its connection ends, but one that stays connected and simply goes quiet would
+  otherwise hold a pipe and a blocked goroutine indefinitely.
+- **Slow is not the same as abandoned.** A connector reading a large file off a slow disk is doing
+  nothing wrong, so the deadline is per chunk rather than per stream. Tested with a stream that sends
+  for two seconds under a 600ms idle period and is left alone.
+- Stale streams are closed outside the map lock, so waking one blocked writer does not stall every
+  other stream on the same connection.
 
 ### Stage 37: job.updated push
 - Fan the Stage 19 event channel out to whichever connector owns each job.
@@ -1455,3 +1471,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   checking the supported list passes the exact case the check exists for. Queue sharing is now derived
   from whether CUPS is local. Integration tests run one package at a time, and test cleanup no longer
   depends on the connection under test still working.
+- **2026-09-01, after Stage 36:** found during an autonomous check that Stage 35 had left a
+  `streamIdle` constant documenting a protection that was never implemented. Implemented it. The
+  lesson is narrow and worth keeping: a named constant with an explanatory comment reads as a finished
+  decision, so leaving one unwired hides the gap rather than marking it.

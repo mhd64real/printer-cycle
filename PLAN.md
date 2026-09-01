@@ -1127,7 +1127,20 @@ depends on the loose version.
 - `settings.get`, the `settings.changed` notification, secret values write-only.
 - **Done when:** editing a setting reaches a running connector without a restart, and secrets never
   come back out.
-- **Status:** todo
+- **Status:** done, 2026-09-02, tested under `-race`.
+- **The spec's scope list had no entry for connectors at all.** It covered printers, jobs, identities
+  and users, which left the dashboard's own main screen with no permission describing what it does.
+  Added `connectors.read` and `connectors.manage`.
+- **Reading your own settings and reading everybody's are separate methods**, rather than one method
+  whose required permission depends on its arguments. `settings.get` needs no scope and includes
+  secrets; `connectors.list` needs `connectors.read` and excludes them. Two operations with different
+  risk deserve two names, and it keeps the permission table a plain lookup.
+- **The values travel with the change notification**, rather than telling the connector to come and
+  ask, since it would only turn round and call `settings.get`. One message instead of two.
+- **The reply to setting a value does not echo it back**, so replacing a secret is not a way to read
+  the old one. Tested by writing a secret twice and checking neither appears in either reply.
+- `connectors.list` reports whether each connector is `connected`, so the page can tell something
+  installed from something actually running.
 
 ### Stage 39b: User sessions in core (ADDED 2026-09-02)
 - Core issues a session on a verified username and password, and methods acting for a person carry
@@ -1556,3 +1569,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   approves one, so the flow it documented could not complete. Raised the gap that core has no notion
   of who a user is, and added Stage 39b for user sessions, because three separate features are now
   quietly relying on trusting a connector's word for it.
+- **2026-09-02, after Stage 39:** added `connectors.read` and `connectors.manage` to the scope list,
+  which had covered everything except the connectors themselves. Documented settings in PROTOCOL.md as
+  section 8b, which had described a settings schema without ever saying how settings are read or
+  written.

@@ -195,16 +195,7 @@ func (c *conn) identityRevoke(ctx context.Context, params json.RawMessage) (any,
 
 // notifyIdentityLinked tells a connector that a pairing it started completed.
 func (s *Server) notifyIdentityLinked(ctx context.Context, link store.IdentityLink) {
-	s.mu.Lock()
-	targets := make([]*conn, 0, 2)
-	for c := range s.conns {
-		if connector := c.authenticated(); connector != nil && connector.ID == link.ConnectorID {
-			targets = append(targets, c)
-		}
-	}
-	s.mu.Unlock()
-
-	for _, c := range targets {
+	for _, c := range s.connectionsFor(link.ConnectorID) {
 		sendCtx, cancel := context.WithTimeout(ctx, notifyTimeout)
 		err := c.rpc.Notify(sendCtx, "identity.linked", map[string]any{
 			"external_id": link.ExternalID,

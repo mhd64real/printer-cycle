@@ -36,18 +36,26 @@ const (
 	ScopeIdentityLink   = "identity.link"
 	ScopeUsersRead      = "users.read"
 	ScopeUsersManage    = "users.manage"
+
+	// Added 2026-09-02. The original scope list covered printers, jobs,
+	// identities and users, and nothing at all for connectors, which left the
+	// dashboard's own main screen with no permission that described it.
+	ScopeConnectorsRead   = "connectors.read"
+	ScopeConnectorsManage = "connectors.manage"
 )
 
 var validScopes = map[string]bool{
-	ScopeJobsSubmit:     true,
-	ScopeJobsRead:       true,
-	ScopeJobsReadAll:    true,
-	ScopeJobsCancel:     true,
-	ScopePrintersRead:   true,
-	ScopePrintersManage: true,
-	ScopeIdentityLink:   true,
-	ScopeUsersRead:      true,
-	ScopeUsersManage:    true,
+	ScopeJobsSubmit:       true,
+	ScopeJobsRead:         true,
+	ScopeJobsReadAll:      true,
+	ScopeJobsCancel:       true,
+	ScopePrintersRead:     true,
+	ScopePrintersManage:   true,
+	ScopeIdentityLink:     true,
+	ScopeUsersRead:        true,
+	ScopeUsersManage:      true,
+	ScopeConnectorsRead:   true,
+	ScopeConnectorsManage: true,
 }
 
 // KnownScopes lists every scope core recognises, sorted.

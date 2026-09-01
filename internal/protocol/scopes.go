@@ -47,6 +47,13 @@ var methodScopes = map[string]string{
 	// users.manage means an administrator has already decided this connector may
 	// speak for people. See identityApprove.
 	"identity.approve": store.ScopeUsersManage,
+
+	// A connector reading its own settings needs no permission: it is asking
+	// about itself, of a core that already knows which one it is.
+	"settings.get": scopeNone,
+
+	"connectors.list":       store.ScopeConnectorsRead,
+	"connectors.setSetting": store.ScopeConnectorsManage,
 }
 
 // requiredScope reports the scope a method needs, and whether it exists at all.

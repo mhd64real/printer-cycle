@@ -195,6 +195,12 @@ Granted per connector, by an admin, at install time. Deny by default.
 | `identity.link` | start and resolve identity links |
 | `users.read` | list users |
 | `users.manage` | create, edit, remove users |
+| `connectors.read` | list connectors, their declared settings and current values |
+| `connectors.manage` | change a connector's settings, enable or disable it, enrol it |
+
+**The connector scopes were added 2026-09-02.** The original list covered printers, jobs, identities
+and users, and nothing at all for connectors, which left the dashboard's own main screen with no
+permission that described what it does.
 
 The dashboard connector is the only one expected to hold the full set. A Telegram connector should
 hold `jobs.submit`, `jobs.read`, `identity.link` and nothing more.
@@ -499,6 +505,48 @@ one such screen per connector, and in practice none.
 Because every binding lives in core, there is one screen that answers "what is linked to my account
 and how do I revoke it." If each connector rolled its own auth end to end, there would be N user
 tables, N security bugs, and no such screen.
+
+---
+
+## 8b. Settings (PROPOSED)
+
+**settings.get** returns the calling connector's own settings. No scope: it is asking about itself,
+of a core that already knows which connector it is. **Secret values are included**, because a
+connector that cannot read back its own bot token cannot use it.
+
+```json
+{"jsonrpc":"2.0","id":30,"method":"settings.get"}
+```
+
+**connectors.list** returns every connector with its declared schema and current values, which is
+what the dashboard draws its connectors page from. Requires `connectors.read`. Secrets are **not**
+included; each appears as `{"secret":true,"set":true}` so the page can show that a token exists
+without showing what it is.
+
+Each entry also carries `connected`, so the page can distinguish a connector that is installed from
+one that is actually running.
+
+**connectors.setSetting** changes one value. Requires `connectors.manage`.
+
+```json
+{"jsonrpc":"2.0","id":31,"method":"connectors.setSetting","params":{
+  "connector_id":"telegram-bot","key":"max_pages","value":42
+}}
+```
+
+Values are checked against the schema the connector declared: an integer past its bounds, an enum
+outside its options, a key never declared. The reply does not echo the value back, so replacing a
+secret is not a way to read one.
+
+Core then sends the affected connector its current settings:
+
+```json
+{"jsonrpc":"2.0","method":"settings.changed","params":{"settings":{...}}}
+```
+
+The values travel with the notification rather than telling the connector to come and ask, because it
+would only turn round and call `settings.get`. **A connector does not restart to pick up a change:**
+somebody correcting a mistyped token expects it to start working.
 
 ---
 

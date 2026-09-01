@@ -163,14 +163,7 @@ func (s *Server) notifyConnector(ctx context.Context, connectorID string, update
 		return
 	}
 
-	s.mu.Lock()
-	targets := make([]*conn, 0, 2)
-	for c := range s.conns {
-		if connector := c.authenticated(); connector != nil && connector.ID == connectorID {
-			targets = append(targets, c)
-		}
-	}
-	s.mu.Unlock()
+	targets := s.connectionsFor(connectorID)
 
 	for _, c := range targets {
 		sendCtx, cancel := context.WithTimeout(ctx, notifyTimeout)

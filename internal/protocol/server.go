@@ -386,6 +386,12 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.identityLinks(ctx, params)
 	case "identity.revoke":
 		return c.identityRevoke(ctx, params)
+	case "settings.get":
+		return c.settingsGet(ctx)
+	case "connectors.list":
+		return c.connectorsList(ctx)
+	case "connectors.setSetting":
+		return c.connectorsSetSetting(ctx, params)
 	}
 
 	// Unreachable: authorise refuses anything absent from the permission table,

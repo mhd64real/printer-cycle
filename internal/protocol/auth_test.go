@@ -64,9 +64,20 @@ type rpcResponse struct {
 
 func (c *client) call(method string, params any) rpcResponse {
 	c.t.Helper()
+	return c.callCollecting(method, params, nil)
+}
+
+// callCollecting makes a call while notifications may be arriving.
+//
+// A connector cannot assume the next frame is its reply: core pushes discovery
+// results and job progress whenever it likes. Anything arriving before the reply
+// is handed to onNotify, which is what a real connector's read loop does.
+func (c *client) callCollecting(method string, params any, onNotify func(method string, params json.RawMessage)) rpcResponse {
+	c.t.Helper()
 
 	c.next++
-	req := map[string]any{"jsonrpc": "2.0", "id": c.next, "method": method}
+	id := c.next
+	req := map[string]any{"jsonrpc": "2.0", "id": id, "method": method}
 	if params != nil {
 		req["params"] = params
 	}
@@ -78,15 +89,68 @@ func (c *client) call(method string, params any) rpcResponse {
 		c.t.Fatalf("writing %s: %v", method, err)
 	}
 
-	_, raw, err := c.ws.Read(c.ctx)
-	if err != nil {
-		c.t.Fatalf("reading the reply to %s: %v", method, err)
+	for {
+		_, raw, err := c.ws.Read(c.ctx)
+		if err != nil {
+			c.t.Fatalf("reading the reply to %s: %v", method, err)
+		}
+
+		var probe struct {
+			ID     *int            `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			c.t.Fatalf("frame is not JSON: %v (%s)", err, raw)
+		}
+
+		if probe.Method != "" && probe.ID == nil {
+			if onNotify != nil {
+				onNotify(probe.Method, probe.Params)
+			}
+			continue
+		}
+		if probe.ID == nil || *probe.ID != id {
+			continue
+		}
+
+		var resp rpcResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			c.t.Fatalf("reply to %s is not JSON: %v (%s)", method, err, raw)
+		}
+		return resp
 	}
-	var resp rpcResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		c.t.Fatalf("reply to %s is not JSON: %v (%s)", method, err, raw)
+}
+
+// awaitNotification reads frames until one satisfies want, or the deadline.
+func (c *client) awaitNotification(want func(method string, params json.RawMessage) bool, timeout time.Duration) {
+	c.t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		readCtx, cancel := context.WithDeadline(c.ctx, deadline)
+		_, raw, err := c.ws.Read(readCtx)
+		cancel()
+		if err != nil {
+			c.t.Fatalf("waiting for a notification: %v", err)
+		}
+
+		var probe struct {
+			ID     *int            `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			continue
+		}
+		if probe.Method == "" || probe.ID != nil {
+			continue
+		}
+		if want(probe.Method, probe.Params) {
+			return
+		}
 	}
-	return resp
+	c.t.Fatalf("no matching notification within %v", timeout)
 }
 
 func (c *client) proof(key ed25519.PrivateKey) string {

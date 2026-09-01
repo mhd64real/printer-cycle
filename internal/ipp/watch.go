@@ -245,8 +245,18 @@ func parseEvent(attrs goipp.Attributes) (Event, bool) {
 	}
 
 	seq, _ := integer(attrs, "notify-sequence-number")
-	jobID, _ := integer(attrs, "job-id")
 	jobState, _ := integer(attrs, "job-state")
+
+	// The job an event is about arrives as notify-job-id, not job-id.
+	//
+	// Worth stating plainly because reading the wrong one fails silently: the
+	// attribute is simply absent, the identifier comes back as zero, and every
+	// job event looks like it concerns no job at all. job-id is tried as well,
+	// since RFC 3995 names it that way and not every IPP server is CUPS.
+	jobID, ok := integer(attrs, "notify-job-id")
+	if !ok {
+		jobID, _ = integer(attrs, "job-id")
+	}
 	pagesDone, _ := integer(attrs, "job-impressions-completed")
 	printerState, _ := integer(attrs, "printer-state")
 
@@ -261,7 +271,12 @@ func parseEvent(attrs goipp.Attributes) (Event, bool) {
 		PrinterState:        PrinterState(printerState),
 		PrinterStateReasons: strs(attrs, "printer-state-reasons"),
 	}
-	e.Printer = printerNameFromURI(str(attrs, "notify-printer-uri"))
+	// printer-name is sent directly; the URI is a fallback for servers that
+	// send only that.
+	e.Printer = str(attrs, "printer-name")
+	if e.Printer == "" {
+		e.Printer = printerNameFromURI(str(attrs, "notify-printer-uri"))
+	}
 	return e, true
 }
 

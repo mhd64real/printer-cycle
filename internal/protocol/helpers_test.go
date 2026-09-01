@@ -2,6 +2,7 @@ package protocol_test
 
 import (
 	"context"
+	"io"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -157,4 +158,41 @@ func cupsBackedServerWithIdle(t *testing.T, idle time.Duration) (string, *store.
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return "ws" + strings.TrimPrefix(srv.URL, "http") + protocol.ConnectorPath, db
+}
+
+// watchingServer is a protocol server with its CUPS watcher running, which is
+// what makes job progress reach connectors.
+//
+// Not the default for every test: each one starts a subscription and polls
+// cupsd, and a hundred of those would be a hundred pollers against one
+// container.
+func watchingServer(t *testing.T) (string, *store.DB) {
+	t.Helper()
+
+	cups, err := ipp.New(skipWithoutCUPS(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "printer-cycle.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	s := protocol.NewServer(db, protocol.Options{Logger: quietLogger(), CUPS: cups})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	t.Cleanup(s.Start(ctx))
+
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http") + protocol.ConnectorPath, db
+}
+
+func stringsReader(s string) io.Reader { return strings.NewReader(s) }
+
+func ippPrintOptions() ipp.PrintOptions {
+	return ipp.PrintOptions{JobName: "direct", Format: "text/plain", User: "someone-else"}
 }

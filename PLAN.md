@@ -1057,7 +1057,39 @@ starved each other; integration tests now run one package at a time.
   chain could not handle, and it must not be reported to the user as a successful print.
 - **Done when:** a connector receives state changes it never asked for, in order, and a job that
   completed without printing anything is not reported as success.
-- **Status:** todo
+- **Status:** done, 2026-09-01:
+
+```
+job.updated  state=pending     pages=0
+job.updated  state=processing  pages=0
+job.updated  state=completed   pages=1
+```
+
+**A bug from Stage 19 that had made this whole feature dead on arrival.** CUPS names the job in an
+event `notify-job-id`. The parser read `job-id`, which is simply not there, so every event came back
+concerning job zero, matched nothing, and was discarded as "somebody printed through CUPS directly".
+Job progress reached nobody.
+
+It survived two stages because **Stage 19's test asserted what kind of events arrived and never which
+job they were about.** A test that had asked "which job is this?" would have failed immediately. That
+assertion now exists, with the reason attached, so removing it later looks like what it is.
+
+- **Watching starts with the server, not with a connection.** A job outlives the connector that
+  submitted it, and somebody may be watching from a different one. `Start` is separate from `Serve` so
+  anything mounting the handler itself must also start the background work, rather than printing jobs
+  and reporting nothing.
+- **The watcher reconnects with backoff.** cupsd restarting is ordinary on a machine that also
+  installs driver packages, and a print server that quietly stops reporting progress after an
+  unrelated restart is worse than one that never reported.
+- **A completed job is not automatically a success.** A job that carried bytes and produced no
+  impressions is reported as failed and flagged, because CUPS 2.4 reports jobs it could not filter as
+  completed successfully having printed nothing. Somebody walks to the printer, finds nothing, and has
+  no idea which part to distrust.
+- **Narrow on purpose:** a zero-byte document producing nothing is exactly right and is left alone.
+  Cancelled and aborted jobs pass through as themselves. Four unit tests pin the distinctions.
+- Jobs printed through CUPS directly, bypassing printer-cycle, are ignored rather than adopted.
+- Deliveries are bounded per connection, so a connector that has stopped reading cannot delay updates
+  to every other connector.
 
 ### Stage 38: Identity linking
 - `identity.linkRequest`, `identity.resolve`, the `identity.linked` notification, code expiry.
@@ -1475,3 +1507,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   `streamIdle` constant documenting a protection that was never implemented. Implemented it. The
   lesson is narrow and worth keeping: a named constant with an explanatory comment reads as a finished
   decision, so leaving one unwired hides the gap rather than marking it.
+- **2026-09-01, after Stage 37:** found that Stage 19 read the wrong attribute name for a job event's
+  job id, which silently disabled every job notification. The lesson is about the test rather than the
+  typo: asserting that events *arrive* is not the same as asserting they *identify anything*, and only
+  the second would have caught this. The missing assertion has been added.

@@ -907,6 +907,7 @@ func TestWatchDeliversJobEvents(t *testing.T) {
 	type seen struct {
 		kind  string
 		state ipp.JobState
+		jobID int
 	}
 
 	var (
@@ -927,7 +928,7 @@ func TestWatchDeliversJobEvents(t *testing.T) {
 		}, func(e ipp.Event) {
 			mu.Lock()
 			defer mu.Unlock()
-			events = append(events, seen{e.Type, e.JobState})
+			events = append(events, seen{e.Type, e.JobState, e.JobID})
 		})
 	}()
 
@@ -982,6 +983,25 @@ func TestWatchDeliversJobEvents(t *testing.T) {
 			created = true
 		case "job-state-changed", "job-completed":
 			changed = true
+		}
+	}
+
+	// Every job event must say which job it is about.
+	//
+	// This assertion is here because its absence hid a real bug for two stages:
+	// CUPS sends the identifier as notify-job-id, the parser read job-id, and
+	// the attribute simply was not there. Every event came back concerning job
+	// zero, which nothing matches, so job progress reached nobody. The tests
+	// passed the whole time, because they checked what kind of events arrived
+	// and never which job they were for.
+	for _, e := range events {
+		if e.kind == "printer-state-changed" {
+			continue
+		}
+		if e.jobID == 0 {
+			t.Errorf("a %s event named no job", e.kind)
+		} else if e.jobID != job.ID {
+			t.Errorf("a %s event named job %d, the one printed was %d", e.kind, e.jobID, job.ID)
 		}
 	}
 	if !created {

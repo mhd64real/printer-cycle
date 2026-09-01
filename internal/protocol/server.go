@@ -105,6 +105,19 @@ func NewServer(db *store.DB, opts Options) *Server {
 	}
 }
 
+// Start begins the background work a server does regardless of who is
+// connected, and returns a function that stops it.
+//
+// Separate from Serve because job progress comes from CUPS rather than from any
+// connection: a job outlives the connector that submitted it, and somebody may
+// be watching from a different one. Serve calls this; anything mounting Handler
+// itself has to call it too, or jobs will be printed and never reported.
+func (s *Server) Start(ctx context.Context) (stop func()) {
+	watchCtx, cancel := context.WithCancel(ctx)
+	go s.watchCUPS(watchCtx)
+	return cancel
+}
+
 // Handler returns the HTTP handler serving the connector protocol.
 //
 // Exposed separately from Serve so tests can drive it through httptest without
@@ -144,6 +157,9 @@ func (s *Server) Serve(ctx context.Context, addrs ...string) error {
 		listeners = append(listeners, ln)
 		s.log.Info("listening for connectors", "address", ln.Addr().String())
 	}
+
+	stopBackground := s.Start(ctx)
+	defer stopBackground()
 
 	errs := make(chan error, len(listeners))
 	for _, ln := range listeners {

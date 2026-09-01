@@ -376,6 +376,16 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.jobsSubmit(ctx, params)
 	case "jobs.commit":
 		return c.jobsCommit(ctx, params)
+	case "identity.resolve":
+		return c.identityResolve(ctx, params)
+	case "identity.linkRequest":
+		return c.identityLinkRequest(ctx, params)
+	case "identity.approve":
+		return c.identityApprove(ctx, params)
+	case "identity.links":
+		return c.identityLinks(ctx, params)
+	case "identity.revoke":
+		return c.identityRevoke(ctx, params)
 	}
 
 	// Unreachable: authorise refuses anything absent from the permission table,

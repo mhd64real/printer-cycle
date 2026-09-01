@@ -452,14 +452,49 @@ Returns `{"user_id":"user_01H..."}` or error -32006.
 }}
 ```
 
-Returns `{"code":"J4K-7QP","expires_at":"..."}`. The connector delivers that code however it likes.
-The user approves it in the dashboard, core writes the binding, and core notifies the connector:
+Returns `{"code":"2JG6-7F6W","expires_at":"..."}`. The connector delivers that code however it
+likes. Eight characters of Crockford base32, which omits I, L, O and U so nothing is misread while
+being copied off a phone by hand. A code lasts ten minutes by default and an hour at most: it is a
+credential in transit, and a connector asking for one that lives all day is asking for something it
+should not have.
+
+**identity.approve** binds the identity behind a code to a user. Requires `users.manage`, not
+`identity.link`.
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"identity.approve","params":{
+  "code":"2JG6-7F6W","user_id":"user_01H..."
+}}
+```
+
+The caller asserts which user is approving, and core cannot check that claim on its own, because user
+sessions live in the dashboard rather than in core. So the assertion is only as trustworthy as the
+connector making it, and requiring `users.manage` means an administrator has already decided this
+connector may speak for people. A connector holding only `identity.link` can ask for codes and
+resolve identities; it cannot decide who anybody is.
+
+That is looser than this document's own rule that core never trusts a connector's claim about a
+person. It is recorded rather than hidden, and tightens once core issues user sessions.
+
+Unknown, expired and already-used codes are refused identically, so guessing gets no signal about
+which guess came closest. Codes are accepted in any case, with or without the hyphen, and with stray
+spaces, because they are typed by people.
+
+Re-linking an identity moves it rather than failing. Somebody handing an old phone to a family member
+should not need an administrator to unpick a row first.
+
+Core then notifies the connector that asked for the code, so it can carry on without polling:
 
 ```json
 {"jsonrpc":"2.0","method":"identity.linked","params":{
-  "external_id":"tg:887312","user_id":"user_01H..."
+  "external_id":"tg:887312","user_id":"user_01H...","display":"@mhd64"
 }}
 ```
+
+**identity.links** lists what is linked to an account and **identity.revoke** removes one. Both
+require `identity.link`. These are the screen that answers "what can reach my printing, and how do I
+stop it", which exists only because core owns the bindings; one user table per connector would mean
+one such screen per connector, and in practice none.
 
 Because every binding lives in core, there is one screen that answers "what is linked to my account
 and how do I revoke it." If each connector rolled its own auth end to end, there would be N user

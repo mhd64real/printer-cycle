@@ -36,6 +36,17 @@ var methodScopes = map[string]string{
 
 	"jobs.submit": store.ScopeJobsSubmit,
 	"jobs.commit": store.ScopeJobsSubmit,
+
+	"identity.resolve":     store.ScopeIdentityLink,
+	"identity.linkRequest": store.ScopeIdentityLink,
+	"identity.links":       store.ScopeIdentityLink,
+	"identity.revoke":      store.ScopeIdentityLink,
+
+	// Approving asserts which user is approving, and core cannot check that
+	// claim: user sessions live in the dashboard rather than here. Requiring
+	// users.manage means an administrator has already decided this connector may
+	// speak for people. See identityApprove.
+	"identity.approve": store.ScopeUsersManage,
 }
 
 // requiredScope reports the scope a method needs, and whether it exists at all.

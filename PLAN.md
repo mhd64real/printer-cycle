@@ -1094,12 +1094,52 @@ assertion now exists, with the reason attached, so removing it later looks like 
 ### Stage 38: Identity linking
 - `identity.linkRequest`, `identity.resolve`, the `identity.linked` notification, code expiry.
 - **Done when:** a fake connector links an external id to a user through the full flow.
-- **Status:** todo
+- **Status:** done, 2026-09-02, tested under `-race`. Sample code: `2JG6-7F6W`.
+- **The spec was missing the operation that completes the flow.** It described requesting a code and
+  being told the pairing happened, and never said how a user approves one. Added as
+  `identity.approve`, along with `identity.links` and `identity.revoke`.
+- **Codes are shaped for people.** Eight characters of Crockford base32, which omits I, L, O and U so
+  nothing is misread while being copied off a phone, and accepted in any case, with or without the
+  hyphen, with stray spaces. Forty bits over a ten-minute life, so guessing is not a practical attack.
+- **A connector can only resolve identities in its own namespace.** A Telegram connector cannot
+  discover who a Signal identity belongs to, because the lookup is scoped to the connector making it.
+- **Re-linking moves an identity rather than failing.** Somebody handing an old phone to a family
+  member should not need an administrator to unpick a row.
+- Unknown, expired and already-used codes are refused identically.
+- Expired requests are cleared on write rather than by a background sweeper, since they are only ever
+  looked up by exact code and a machine with 512MB does not need another periodic task.
+
+### OPEN GAP, raised at Stage 38: core has no idea who a user is
+
+`identity.approve` asserts which user is approving, and **core cannot check that claim.** It has no
+user sessions: the dashboard verifies passwords and holds the session, and core sees only a connector
+saying "this is Mohamed".
+
+The interim answer is that approving requires `users.manage` rather than `identity.link`, so an
+administrator has decided the connector may speak for people. That is defensible and it is still
+looser than this project's own rule that core never trusts a connector's claim about a person.
+
+**The proper fix is user sessions in core**, which is also what Stage 43 needs and what
+`jobs.submit`'s `on_behalf_of` will need at Stage 40. Added as Stage 39b so it lands before anything
+depends on the loose version.
 
 ### Stage 39: Settings read and change
 - `settings.get`, the `settings.changed` notification, secret values write-only.
 - **Done when:** editing a setting reaches a running connector without a restart, and secrets never
   come back out.
+- **Status:** todo
+
+### Stage 39b: User sessions in core (ADDED 2026-09-02)
+- Core issues a session on a verified username and password, and methods acting for a person carry
+  that session instead of naming a user.
+- **Why it cannot wait.** Three things already lean on core having no answer here: `identity.approve`
+  takes a user id on trust (Stage 38), `on_behalf_of` will do the same (Stage 40), and the dashboard
+  has to authenticate people somehow (Stage 43). Each one is individually defensible and together
+  they mean the rule that core never trusts a connector's claim about a person is not actually true.
+- Needs `users.authenticate` returning a session, a sessions table with expiry, and a way for a
+  method to require one.
+- **Done when:** `identity.approve` takes a session rather than a user id, and a connector cannot
+  approve a pairing for somebody who has not signed in.
 - **Status:** todo
 
 ### Stage 40: On-behalf-of enforcement
@@ -1511,3 +1551,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   job id, which silently disabled every job notification. The lesson is about the test rather than the
   typo: asserting that events *arrive* is not the same as asserting they *identify anything*, and only
   the second would have caught this. The missing assertion has been added.
+- **2026-09-02, after Stage 38:** added `identity.approve`, `identity.links` and `identity.revoke` to
+  PROTOCOL.md; the spec described requesting a code and hearing the result but never how a user
+  approves one, so the flow it documented could not complete. Raised the gap that core has no notion
+  of who a user is, and added Stage 39b for user sessions, because three separate features are now
+  quietly relying on trusting a connector's word for it.

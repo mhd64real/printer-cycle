@@ -176,7 +176,16 @@ func (db *DB) SetPassword(ctx context.Context, id, password string) error {
 	if err != nil {
 		return err
 	}
-	return requireOneRow(res)
+	if err := requireOneRow(res); err != nil {
+		return err
+	}
+
+	// Every session belonging to this account stops working.
+	//
+	// Changing a password is what somebody does when they believe it is known,
+	// and leaving existing sessions alive would mean the change accomplishes
+	// nothing against the person they are worried about.
+	return db.EndUserSessions(ctx, id)
 }
 
 // SetAdmin promotes or demotes a user.

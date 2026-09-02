@@ -64,6 +64,9 @@ type Server struct {
 	// default; tests set it short so abandonment can be observed.
 	streamIdle time.Duration
 
+	// signIns throttles password attempts.
+	signIns *throttle
+
 	// discovering serialises device discovery across every connector.
 	//
 	// Discovery makes the SNMP backend broadcast across the subnet. Several
@@ -100,6 +103,7 @@ func NewServer(db *store.DB, opts Options) *Server {
 		db:         db,
 		cups:       opts.CUPS,
 		streamIdle: opts.StreamIdle,
+		signIns:    newThrottle(),
 		log:        log,
 		conns:      make(map[*conn]struct{}),
 	}
@@ -392,6 +396,12 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.connectorsList(ctx)
 	case "connectors.setSetting":
 		return c.connectorsSetSetting(ctx, params)
+	case "users.authenticate":
+		return c.usersAuthenticate(ctx, params)
+	case "users.signOut":
+		return c.usersSignOut(ctx, params)
+	case "users.whoami":
+		return c.usersWhoami(ctx, params)
 	}
 
 	// Unreachable: authorise refuses anything absent from the permission table,

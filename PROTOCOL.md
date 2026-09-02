@@ -197,6 +197,12 @@ Granted per connector, by an admin, at install time. Deny by default.
 | `users.manage` | create, edit, remove users |
 | `connectors.read` | list connectors, their declared settings and current values |
 | `connectors.manage` | change a connector's settings, enable or disable it, enrol it |
+| `users.authenticate` | host a sign-in, exchanging a password for a session |
+
+`users.authenticate` is separate from `users.read` on purpose. Listing who has an account and being
+allowed to try their passwords are different powers, and a connector that merely shows a user list
+has no business holding the second. An AirPrint connector should never have it; the dashboard
+should.
 
 **The connector scopes were added 2026-09-02.** The original list covered printers, jobs, identities
 and users, and nothing at all for connectors, which left the dashboard's own main screen with no
@@ -464,23 +470,18 @@ being copied off a phone by hand. A code lasts ten minutes by default and an hou
 credential in transit, and a connector asking for one that lives all day is asking for something it
 should not have.
 
-**identity.approve** binds the identity behind a code to a user. Requires `users.manage`, not
+**identity.approve** binds the identity behind a code to the person approving it. Requires
 `identity.link`.
 
 ```json
 {"jsonrpc":"2.0","id":7,"method":"identity.approve","params":{
-  "code":"2JG6-7F6W","user_id":"user_01H..."
+  "code":"2JG6-7F6W","session":"9f3a..."
 }}
 ```
 
-The caller asserts which user is approving, and core cannot check that claim on its own, because user
-sessions live in the dashboard rather than in core. So the assertion is only as trustworthy as the
-connector making it, and requiring `users.manage` means an administrator has already decided this
-connector may speak for people. A connector holding only `identity.link` can ask for codes and
-resolve identities; it cannot decide who anybody is.
-
-That is looser than this document's own rule that core never trusts a connector's claim about a
-person. It is recorded rather than hidden, and tightens once core issues user sessions.
+The approver is identified by their **session**, not by a connector naming them. A connector cannot
+decide who anybody is; it can only pass along a session that person obtained by signing in. See
+section 8a.
 
 Unknown, expired and already-used codes are refused identically, so guessing gets no signal about
 which guess came closest. Codes are accepted in any case, with or without the hyphen, and with stray
@@ -505,6 +506,43 @@ one such screen per connector, and in practice none.
 Because every binding lives in core, there is one screen that answers "what is linked to my account
 and how do I revoke it." If each connector rolled its own auth end to end, there would be N user
 tables, N security bugs, and no such screen.
+
+---
+
+## 8a. Sessions (PROPOSED)
+
+**How core knows who a person is.**
+
+Until this existed, anything acting for somebody named them and core believed it. That contradicted
+rule 1 in section 0, quietly, in three places at once.
+
+**users.authenticate** exchanges a password for a session. Requires `users.authenticate`.
+
+```json
+{"jsonrpc":"2.0","id":40,"method":"users.authenticate","params":{
+  "username":"mohamed","password":"..."
+}}
+```
+
+```json
+{"result":{
+  "session":"9f3a...",
+  "expires_at":"2026-09-02T21:00:00Z",
+  "user":{"id":"user_01H...","username":"mohamed","display_name":"Mohamed","is_admin":true}
+}}
+```
+
+**A session belongs to the connector that issued it.** One minted by the dashboard cannot be used by
+another connector that happened to see it go past. Sessions last twelve hours, end when the password
+changes, and end on **users.signOut**. **users.whoami** resolves one without doing anything else with
+it. Neither needs a scope: both operate on a session the caller already holds.
+
+Failed sign-ins are throttled per username, because issuing a session from a password otherwise makes
+this an unlimited password oracle for anything holding the scope. While throttled, even the correct
+password is refused, so guessing gains nothing by eventually landing on it.
+
+**Methods that act for a person take a session, never a user id.** A connector cannot decide who
+anybody is; it can only pass along a session that person obtained by signing in.
 
 ---
 

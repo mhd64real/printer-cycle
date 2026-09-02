@@ -60,9 +60,10 @@ func TestTheFullPairingFlow(t *testing.T) {
 
 	// The person types it into the dashboard while signed in as themselves.
 	dashboard := authedClient(t, url, db, "dashboard", store.KnownScopes())
+	session := signIn(t, dashboard, "mohamed", "hunter2hunter2")
 	resp = dashboard.call("identity.approve", map[string]any{
 		"code":    issued.Code,
-		"user_id": user.ID,
+		"session": session,
 	})
 	if resp.Error != nil {
 		t.Fatalf("approving: %v", resp.Error)
@@ -119,7 +120,7 @@ func TestTheFullPairingFlow(t *testing.T) {
 // A code is spent when used. A second approval must not create a second link.
 func TestAPairingCodeWorksOnce(t *testing.T) {
 	url, db := testServer(t)
-	user, _ := db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
+	_, _ = db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
 
 	telegram := authedClient(t, url, db, "telegram", []string{store.ScopeIdentityLink})
 	dashboard := authedClient(t, url, db, "dashboard", store.KnownScopes())
@@ -130,14 +131,16 @@ func TestAPairingCodeWorksOnce(t *testing.T) {
 	}
 	json.Unmarshal(resp.Result, &issued)
 
+	session := signIn(t, dashboard, "mohamed", "hunter2hunter2")
+
 	if resp := dashboard.call("identity.approve", map[string]any{
-		"code": issued.Code, "user_id": user.ID,
+		"code": issued.Code, "session": session,
 	}); resp.Error != nil {
 		t.Fatal(resp.Error)
 	}
 
 	if resp := dashboard.call("identity.approve", map[string]any{
-		"code": issued.Code, "user_id": user.ID,
+		"code": issued.Code, "session": session,
 	}); resp.Error == nil {
 		t.Error("a pairing code worked twice")
 	}
@@ -147,7 +150,7 @@ func TestAPairingCodeWorksOnce(t *testing.T) {
 // gets no signal about which guess came closest.
 func TestEveryBadCodeLooksTheSame(t *testing.T) {
 	url, db := testServer(t)
-	user, _ := db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
+	_, _ = db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
 
 	telegram := authedClient(t, url, db, "telegram", []string{store.ScopeIdentityLink})
 	dashboard := authedClient(t, url, db, "dashboard", store.KnownScopes())
@@ -157,7 +160,8 @@ func TestEveryBadCodeLooksTheSame(t *testing.T) {
 		Code string `json:"code"`
 	}
 	json.Unmarshal(resp.Result, &issued)
-	dashboard.call("identity.approve", map[string]any{"code": issued.Code, "user_id": user.ID})
+	session := signIn(t, dashboard, "mohamed", "hunter2hunter2")
+	dashboard.call("identity.approve", map[string]any{"code": issued.Code, "session": session})
 
 	// And one that expired.
 	resp = telegram.call("identity.linkRequest", map[string]any{"external_id": "tg:3"})
@@ -176,7 +180,7 @@ func TestEveryBadCodeLooksTheSame(t *testing.T) {
 		"never issued": "ABCD-EFGH",
 		"nonsense":     "not a code",
 	} {
-		resp := dashboard.call("identity.approve", map[string]any{"code": code, "user_id": user.ID})
+		resp := dashboard.call("identity.approve", map[string]any{"code": code, "session": session})
 		if resp.Error == nil {
 			t.Fatalf("%s code was accepted", name)
 		}
@@ -193,10 +197,12 @@ func TestEveryBadCodeLooksTheSame(t *testing.T) {
 // without the hyphen, with a stray space.
 func TestCodesAreTypedByPeople(t *testing.T) {
 	url, db := testServer(t)
-	user, _ := db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
+	_, _ = db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
 
 	telegram := authedClient(t, url, db, "telegram", []string{store.ScopeIdentityLink})
 	dashboard := authedClient(t, url, db, "dashboard", store.KnownScopes())
+
+	session := signIn(t, dashboard, "mohamed", "hunter2hunter2")
 
 	for i, mangle := range []func(string) string{
 		strings.ToLower,
@@ -212,7 +218,7 @@ func TestCodesAreTypedByPeople(t *testing.T) {
 		json.Unmarshal(resp.Result, &issued)
 
 		resp = dashboard.call("identity.approve", map[string]any{
-			"code": mangle(issued.Code), "user_id": user.ID,
+			"code": mangle(issued.Code), "session": session,
 		})
 		if resp.Error != nil {
 			t.Errorf("a code typed as %q was refused: %v", mangle(issued.Code), resp.Error)
@@ -224,7 +230,7 @@ func TestCodesAreTypedByPeople(t *testing.T) {
 // connector must not be able to discover who a Signal identity belongs to.
 func TestAConnectorCannotResolveAnotherConnectorsIdentities(t *testing.T) {
 	url, db := testServer(t)
-	user, _ := db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
+	_, _ = db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
 
 	signal := authedClient(t, url, db, "signal", []string{store.ScopeIdentityLink})
 	dashboard := authedClient(t, url, db, "dashboard", store.KnownScopes())
@@ -234,7 +240,8 @@ func TestAConnectorCannotResolveAnotherConnectorsIdentities(t *testing.T) {
 		Code string `json:"code"`
 	}
 	json.Unmarshal(resp.Result, &issued)
-	dashboard.call("identity.approve", map[string]any{"code": issued.Code, "user_id": user.ID})
+	session := signIn(t, dashboard, "mohamed", "hunter2hunter2")
+	dashboard.call("identity.approve", map[string]any{"code": issued.Code, "session": session})
 
 	// Same external id, different connector.
 	telegram := authedClient(t, url, db, "telegram", []string{store.ScopeIdentityLink})
@@ -258,37 +265,46 @@ func TestApprovingNeedsMoreThanIdentityLink(t *testing.T) {
 	}
 	json.Unmarshal(resp.Result, &issued)
 
-	resp = telegram.call("identity.approve", map[string]any{"code": issued.Code, "user_id": user.ID})
-	if resp.Error == nil || resp.Error.Code != jsonrpc.CodeScopeDenied {
-		t.Errorf("a connector holding only identity.link approved a pairing: %v", resp.Error)
+	// Holding identity.link is not enough on its own: approving needs a session,
+	// and getting one needs a scope this connector does not have.
+	resp = telegram.call("identity.approve", map[string]any{"code": issued.Code, "session": "made-up"})
+	if resp.Error == nil || resp.Error.Code != jsonrpc.CodeNotAuthenticated {
+		t.Errorf("a made-up session was accepted: %v", resp.Error)
 	}
+
+	if resp := telegram.call("users.authenticate", map[string]any{
+		"username": "mohamed", "password": "hunter2hunter2",
+	}); resp.Error == nil || resp.Error.Code != jsonrpc.CodeScopeDenied {
+		t.Errorf("a connector without users.authenticate hosted a sign-in: %v", resp.Error)
+	}
+	_ = user
 }
 
 // Re-linking moves an identity rather than failing. Somebody handing an old
 // phone to a family member should not need an administrator to unpick a row.
 func TestRelinkingMovesAnIdentity(t *testing.T) {
 	url, db := testServer(t)
-	first, _ := db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
+	_, _ = db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2")
 	second, _ := db.CreateUser(ctx(), "yasmin", "", "hunter2hunter2")
 
 	telegram := authedClient(t, url, db, "telegram", []string{store.ScopeIdentityLink})
 	dashboard := authedClient(t, url, db, "dashboard", store.KnownScopes())
 
-	link := func(user string) {
+	link := func(username string) {
 		resp := telegram.call("identity.linkRequest", map[string]any{"external_id": "tg:shared"})
 		var issued struct {
 			Code string `json:"code"`
 		}
 		json.Unmarshal(resp.Result, &issued)
 		if resp := dashboard.call("identity.approve", map[string]any{
-			"code": issued.Code, "user_id": user,
+			"code": issued.Code, "session": signIn(t, dashboard, username, "hunter2hunter2"),
 		}); resp.Error != nil {
 			t.Fatalf("approving: %v", resp.Error)
 		}
 	}
 
-	link(first.ID)
-	link(second.ID)
+	link("mohamed")
+	link("yasmin")
 
 	resp := telegram.call("identity.resolve", map[string]any{"external_id": "tg:shared"})
 	var resolved struct {

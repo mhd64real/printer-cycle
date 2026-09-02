@@ -85,48 +85,45 @@ func (c *conn) identityLinkRequest(ctx context.Context, params json.RawMessage) 
 }
 
 type approveParams struct {
-	Code   string `json:"code"`
-	UserID string `json:"user_id"`
+	Code    string `json:"code"`
+	Session string `json:"session"`
 }
 
-// identityApprove binds the identity behind a code to a user.
+// identityApprove binds the identity behind a code to the person approving it.
 //
-// # Why this needs users.manage rather than identity.link
+// The approver is identified by their session, not by a connector naming them.
+// That distinction is the whole point: a connector cannot decide who anybody is,
+// it can only pass along a session the person obtained by signing in.
 //
-// The caller asserts which user is approving, and core has no way to check that
-// on its own: user sessions live in the dashboard, not here. So the assertion is
-// only as trustworthy as the connector making it, and requiring users.manage
-// means an administrator has already decided this connector may speak for
-// people. A connector holding only identity.link can ask for codes and resolve
-// identities; it cannot decide who anybody is.
-//
-// This is looser than the design intends and is recorded as such. See the note
-// on user sessions in PLAN.md.
+// An earlier version took a user id on trust and required users.manage to make
+// that trust an explicit administrative decision. It worked and it was still a
+// connector's word for who somebody was.
 func (c *conn) identityApprove(ctx context.Context, params json.RawMessage) (any, error) {
 	var p approveParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
 	}
-	if strings.TrimSpace(p.Code) == "" || strings.TrimSpace(p.UserID) == "" {
-		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "a code and a user are both required")
+	if strings.TrimSpace(p.Code) == "" {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "no pairing code given")
 	}
 
-	link, err := c.db.ApproveLinkRequest(ctx, p.Code, p.UserID)
+	user, err := c.userFromSession(ctx, p.Session)
+	if err != nil {
+		return nil, err
+	}
+
+	link, err := c.db.ApproveLinkRequest(ctx, p.Code, user.ID)
 	switch {
 	case errors.Is(err, store.ErrLinkCodeInvalid):
-		c.log.Warn("a pairing code was refused")
+		c.log.Warn("a pairing code was refused", "user", user.Username)
 		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "that pairing code is not valid")
-	case errors.Is(err, store.ErrNotFound):
-		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "no such user")
 	case err != nil:
 		return nil, err
 	}
 
 	c.log.Info("identity linked",
-		"connector", link.ConnectorID, "external_id", link.ExternalID, "user", link.UserID)
+		"connector", link.ConnectorID, "external_id", link.ExternalID, "user", user.Username)
 
-	// The connector that asked for the code is told the pairing completed, so it
-	// can carry on with whatever it was doing without polling for an answer.
 	c.server.notifyIdentityLinked(ctx, link)
 
 	return map[string]any{

@@ -42,11 +42,16 @@ var methodScopes = map[string]string{
 	"identity.links":       store.ScopeIdentityLink,
 	"identity.revoke":      store.ScopeIdentityLink,
 
-	// Approving asserts which user is approving, and core cannot check that
-	// claim: user sessions live in the dashboard rather than here. Requiring
-	// users.manage means an administrator has already decided this connector may
-	// speak for people. See identityApprove.
-	"identity.approve": store.ScopeUsersManage,
+	// Approving now carries the approver's own session, so core checks who it
+	// is rather than believing the connector. It therefore needs no more than
+	// the scope for taking part in pairing at all.
+	"identity.approve": store.ScopeIdentityLink,
+
+	// Hosting a sign-in is its own permission. Listing who has an account and
+	// being allowed to try their passwords are different powers.
+	"users.authenticate": store.ScopeUsersAuthenticate,
+	"users.signOut":      scopeNone,
+	"users.whoami":       scopeNone,
 
 	// A connector reading its own settings needs no permission: it is asking
 	// about itself, of a core that already knows which one it is.

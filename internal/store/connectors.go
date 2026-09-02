@@ -42,20 +42,30 @@ const (
 	// dashboard's own main screen with no permission that described it.
 	ScopeConnectorsRead   = "connectors.read"
 	ScopeConnectorsManage = "connectors.manage"
+
+	// ScopeUsersAuthenticate lets a connector host a sign-in.
+	//
+	// Deliberately separate from users.read. Listing who has an account and
+	// being allowed to try their passwords are different powers, and a
+	// connector that merely displays a user list has no business holding the
+	// second. An AirPrint connector should never have this; the dashboard
+	// should.
+	ScopeUsersAuthenticate = "users.authenticate"
 )
 
 var validScopes = map[string]bool{
-	ScopeJobsSubmit:       true,
-	ScopeJobsRead:         true,
-	ScopeJobsReadAll:      true,
-	ScopeJobsCancel:       true,
-	ScopePrintersRead:     true,
-	ScopePrintersManage:   true,
-	ScopeIdentityLink:     true,
-	ScopeUsersRead:        true,
-	ScopeUsersManage:      true,
-	ScopeConnectorsRead:   true,
-	ScopeConnectorsManage: true,
+	ScopeJobsSubmit:        true,
+	ScopeJobsRead:          true,
+	ScopeJobsReadAll:       true,
+	ScopeJobsCancel:        true,
+	ScopePrintersRead:      true,
+	ScopePrintersManage:    true,
+	ScopeIdentityLink:      true,
+	ScopeUsersRead:         true,
+	ScopeUsersManage:       true,
+	ScopeConnectorsRead:    true,
+	ScopeConnectorsManage:  true,
+	ScopeUsersAuthenticate: true,
 }
 
 // KnownScopes lists every scope core recognises, sorted.

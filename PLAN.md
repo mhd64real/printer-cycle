@@ -1153,11 +1153,31 @@ depends on the loose version.
   method to require one.
 - **Done when:** `identity.approve` takes a session rather than a user id, and a connector cannot
   approve a pairing for somebody who has not signed in.
-- **Status:** todo
+- **Status:** done, 2026-09-02, tested under `-race`. **Rule 1 in PROTOCOL.md section 0 is now
+  actually true**, where before it was contradicted quietly in three places.
+- **A session belongs to the connector that issued it.** One minted by the dashboard cannot be used
+  by another connector that happened to see it go past, which matters because connectors are written
+  by other people and share a machine.
+- **Failed sign-ins are throttled per username, not per connection**, since a connector reconnecting
+  is free and would otherwise reset the count. While throttled, even the correct password is refused:
+  somebody guessing must not gain anything by eventually landing on it.
+- **`users.authenticate` is its own scope.** Listing who has an account and being allowed to try
+  their passwords are different powers, and folding the second into `users.read` would have handed it
+  to anything that merely shows a user list.
+- **Changing a password ends every session for that account.** Changing it is what somebody does when
+  they believe it is known, and leaving sessions alive would mean the change achieves nothing against
+  the person they are worried about.
+- Only a hash of each session token is stored, for the same reason as enrolment tokens: core never
+  needs the token again, only to recognise one.
+- `identity.approve` dropped from requiring `users.manage` to `identity.link`, because it no longer
+  asserts anything about anybody. The permission got *smaller* by making the design correct.
 
 ### Stage 40: On-behalf-of enforcement
 - A connector declaring `identity: none` cannot attribute jobs to a user; one declaring `linked`
   can, but only where a link exists.
+- **Simpler now that sessions exist (Stage 39b).** A connector submitting for somebody it has a link
+  with proves nothing about them beyond the link, which core owns and can check for itself. Nothing
+  here needs to take a connector's word for who a person is.
 - **Done when:** a forged `on_behalf_of` is rejected with -32006.
 - **Status:** todo
 
@@ -1573,3 +1593,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   which had covered everything except the connectors themselves. Documented settings in PROTOCOL.md as
   section 8b, which had described a settings schema without ever saying how settings are read or
   written.
+- **2026-09-02, after Stage 39b:** core now knows who a person is. Documented as PROTOCOL.md section
+  8a, and `identity.approve` rewritten to take a session. Worth noting the permission it needs got
+  smaller, not larger: it had required `users.manage` to make trusting a connector's claim an explicit
+  administrative decision, and once the claim is checked rather than trusted, `identity.link` suffices.

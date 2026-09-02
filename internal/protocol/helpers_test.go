@@ -2,6 +2,7 @@ package protocol_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -196,3 +197,28 @@ func stringsReader(s string) io.Reader { return strings.NewReader(s) }
 func ippPrintOptions() ipp.PrintOptions {
 	return ipp.PrintOptions{JobName: "direct", Format: "text/plain", User: "someone-else"}
 }
+
+// signIn obtains a session the way the dashboard would: a username and password
+// exchanged for a token.
+func signIn(t *testing.T, c *client, username, password string) string {
+	t.Helper()
+
+	resp := c.call("users.authenticate", map[string]any{
+		"username": username, "password": password,
+	})
+	if resp.Error != nil {
+		t.Fatalf("signing in as %s: %v", username, resp.Error)
+	}
+	var out struct {
+		Session string `json:"session"`
+	}
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Session == "" {
+		t.Fatal("sign-in returned no session")
+	}
+	return out.Session
+}
+
+func stringsContains(haystack, needle string) bool { return strings.Contains(haystack, needle) }

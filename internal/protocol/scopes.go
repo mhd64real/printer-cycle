@@ -51,6 +51,7 @@ var methodScopes = map[string]string{
 	// being allowed to try their passwords are different powers.
 	"users.authenticate": store.ScopeUsersAuthenticate,
 	"users.signOut":      scopeNone,
+	"users.create":       store.ScopeUsersManage,
 	"users.whoami":       scopeNone,
 
 	// A connector reading its own settings needs no permission: it is asking

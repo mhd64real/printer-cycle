@@ -239,3 +239,85 @@ func (c *conn) enrol(ctx context.Context, params json.RawMessage) (any, error) {
 	c.log.Info("connector enrolled", "connector", connector.ID, "enabled", connector.Enabled)
 	return map[string]any{"connector_id": connector.ID, "enabled": connector.Enabled}, nil
 }
+
+type createUserParams struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Password    string `json:"password"`
+
+	// Session belongs to the administrator creating the account. Not required
+	// on a box that has no accounts yet, because there is nobody to ask.
+	Session string `json:"session"`
+}
+
+// usersCreate adds an account.
+//
+// # Who may do this
+//
+// On a box with no accounts, anybody the dashboard will talk to may create the
+// first one, and it becomes the administrator. That is not a hole: reaching the
+// dashboard at all required the setup token core printed to its own console, so
+// possession of the machine has already been demonstrated.
+//
+// Once an account exists, creating another needs an administrator's session.
+// This is the first place core makes a decision about a *person* rather than
+// about a connector, and it is deliberately narrow: connector scopes say what a
+// connector may attempt, and this says who may authorise it.
+func (c *conn) usersCreate(ctx context.Context, params json.RawMessage) (any, error) {
+	var p createUserParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
+	}
+
+	existing, err := c.db.CountUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if existing > 0 {
+		if strings.TrimSpace(p.Session) == "" {
+			// Saying the session is missing would be true and useless. What
+			// somebody hitting this actually needs to know is that the box is
+			// already set up and this is not the way in.
+			return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated,
+				"this box already has an account; sign in to add another")
+		}
+		actor, err := c.userFromSession(ctx, p.Session)
+		if err != nil {
+			return nil, err
+		}
+		if !actor.IsAdmin {
+			return nil, jsonrpc.Errorf(jsonrpc.CodeScopeDenied,
+				"only an administrator can add an account")
+		}
+	}
+
+	if len(p.Password) < minPasswordLength {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams,
+			"a password needs at least %d characters", minPasswordLength)
+	}
+
+	user, err := c.db.CreateUser(ctx, p.Username, p.DisplayName, p.Password)
+	switch {
+	case errors.Is(err, store.ErrUsernameTaken):
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "that username is taken")
+	case err != nil:
+		return nil, err
+	}
+
+	c.log.Info("account created", "username", user.Username, "admin", user.IsAdmin)
+
+	return map[string]any{
+		"id":           user.ID,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"is_admin":     user.IsAdmin,
+	}, nil
+}
+
+// minPasswordLength is a floor, not a policy.
+//
+// No composition rules: they push people towards predictable substitutions and
+// towards writing the result down. Length is the property that helps, and this
+// is a household print server rather than a bank.
+const minPasswordLength = 10

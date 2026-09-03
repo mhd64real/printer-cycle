@@ -1269,7 +1269,34 @@ access by itself. A test pins that last part.
 - Browser talks HTTP to the dashboard binary; the dashboard relays to core over the socket with its
   own credential, carrying the logged-in user.
 - **Done when:** the browser never holds a connector token and cannot reach core directly.
-- **Status:** todo
+- **Status:** done, 2026-09-03, tested under `-race`.
+- **The browser gets a cookie holding a core session; the connector key stays in the process.** A
+  stolen cookie is also worth less than it looks, because core binds a session to the connector that
+  issued it, so it is unusable by anything except the dashboard.
+- **The relay is an allowlist, not a general passthrough.** A relay that forwarded any method would
+  give a page every power the dashboard connector holds, which is all of them, and would make a single
+  scripting flaw equivalent to owning the machine. A test checks the dangerous ones specifically:
+  `users.authenticate` (a page could try passwords), `enrol` (a page could register a key of its own).
+- **The session is attached by the dashboard, never sent by the page.** A test submits a job naming
+  somebody else's session and confirms the one from the cookie is what reaches core.
+- Cookie is `HttpOnly` and `SameSite=Strict`, and `Secure` only when the connection already is, since
+  setting it unconditionally would break the ordinary case of a Pi on a home network with no
+  certificate.
+- **Signing out ends the session in core, not just the cookie**, since a cookie already copied
+  elsewhere would otherwise keep working.
+- **A refused sign-in does not relay core's wording.** Core deliberately makes a wrong password and an
+  unknown name indistinguishable; passing its message through would undo that.
+
+**Two gaps this stage had to close to exist at all.**
+
+**There was no `users.create`.** The setup token promised a first administrator that no method could
+create. Added, with the first genuine per-*person* rule in core: on a box with no accounts anybody the
+dashboard will talk to may create one, because reaching the dashboard already required the token core
+printed to its own console; after that it takes an administrator's session.
+
+**The HTTP layer was in `package main`, where it could not be tested.** Moved to
+`internal/dashboard` behind a `Caller` interface, so the security properties above are tested against
+a core that answers however a test needs rather than against a running one.
 
 ### Stage 44: First-run setup screen
 - Consume the setup token, create the first admin, land logged in.
@@ -1277,6 +1304,8 @@ access by itself. A test pins that last part.
 - **Status:** todo
 
 ### Stage 45: Login and logout
+- **The server half landed in Stage 43**, which needed sessions to exist before it could relay
+  anything. What is left here is the screen.
 - **Done when:** sessions survive a page reload and expire sensibly.
 - **Status:** todo
 
@@ -1676,3 +1705,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-09-03, after Stage 42:** the frontend is in the build path rather than beside it. Committed
   `web/dist/.gitkeep` because `go:embed` cannot point at a directory that does not exist, which would
   otherwise break `go build` for anyone without node.
+- **2026-09-03, after Stage 43:** added `users.create`, without which the first administrator the
+  setup token promises could not be created by anything. It carries core's first per-person rule, as
+  distinct from a per-connector scope. Moved the dashboard's HTTP layer out of `package main` into
+  `internal/dashboard` so its security properties could be tested rather than asserted in prose.

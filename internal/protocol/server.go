@@ -355,7 +355,7 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 	// One gate, ahead of every handler. Authentication, existence and permission
 	// are all decided here, so no handler can be reached by forgetting to check
 	// something inside it.
-	if err := c.authorise(method); err != nil {
+	if err := c.authorise(ctx, method); err != nil {
 		return nil, err
 	}
 
@@ -396,6 +396,8 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.connectorsList(ctx)
 	case "connectors.setSetting":
 		return c.connectorsSetSetting(ctx, params)
+	case "connectors.setFallbackUser":
+		return c.connectorsSetFallbackUser(ctx, params)
 	case "users.authenticate":
 		return c.usersAuthenticate(ctx, params)
 	case "users.signOut":

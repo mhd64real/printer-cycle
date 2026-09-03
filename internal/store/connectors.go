@@ -498,3 +498,22 @@ func sortStrings(s []string) {
 		}
 	}
 }
+
+// SetConnectorFallbackUser chooses who a connector's jobs belong to when it does
+// not identify people. An empty userID clears it.
+func (db *DB) SetConnectorFallbackUser(ctx context.Context, connectorID, userID string) error {
+	var user any
+	if userID != "" {
+		if _, err := db.User(ctx, userID); err != nil {
+			return err
+		}
+		user = userID
+	}
+
+	res, err := db.ExecContext(ctx,
+		`UPDATE connectors SET fallback_user_id = ? WHERE id = ?`, user, connectorID)
+	if err != nil {
+		return err
+	}
+	return requireOneRow(res)
+}

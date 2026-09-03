@@ -57,8 +57,9 @@ var methodScopes = map[string]string{
 	// about itself, of a core that already knows which one it is.
 	"settings.get": scopeNone,
 
-	"connectors.list":       store.ScopeConnectorsRead,
-	"connectors.setSetting": store.ScopeConnectorsManage,
+	"connectors.list":            store.ScopeConnectorsRead,
+	"connectors.setSetting":      store.ScopeConnectorsManage,
+	"connectors.setFallbackUser": store.ScopeConnectorsManage,
 }
 
 // requiredScope reports the scope a method needs, and whether it exists at all.
@@ -68,10 +69,23 @@ func requiredScope(method string) (string, bool) {
 }
 
 // authorise checks that this connection may call method.
-func (c *conn) authorise(method string) error {
-	connector := c.authenticated()
-	if connector == nil {
-		return jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated, "authenticate before calling %s", method)
+//
+// The connector is read from the database on every call rather than taken from
+// the snapshot made when the connection authenticated.
+//
+// That snapshot is wrong for anything that can change while a connection is
+// open, and several things can: an administrator revoking a scope, disabling a
+// connector, or a connector re-registering with a different identity policy.
+// Deciding from a snapshot means a revoked permission keeps working until the
+// connector happens to reconnect, which for something that stays connected for
+// weeks means never.
+//
+// It costs one small query per call against a local SQLite file. Correctness is
+// worth more than that here.
+func (c *conn) authorise(ctx context.Context, method string) error {
+	connector, err := c.currentConnector(ctx)
+	if err != nil {
+		return err
 	}
 
 	scope, exists := requiredScope(method)
@@ -96,6 +110,30 @@ func (c *conn) authorise(method string) error {
 		Message: "this connector does not hold the scope required by " + method,
 		Data:    json.RawMessage(`{"required_scope":` + quote(scope) + `}`),
 	}
+}
+
+// currentConnector loads this connection's connector as it is now.
+//
+// Refuses if it has been deleted or switched off since the connection opened, so
+// an administrator turning something off does not have to hunt down its
+// connection to make that stick.
+func (c *conn) currentConnector(ctx context.Context) (*store.Connector, error) {
+	snapshot := c.authenticated()
+	if snapshot == nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated, "authenticate first")
+	}
+
+	current, err := c.db.Connector(ctx, snapshot.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated, "this connector no longer exists")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !current.Enabled {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated, "this connector has been disabled")
+	}
+	return &current, nil
 }
 
 func quote(s string) string {

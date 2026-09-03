@@ -272,15 +272,33 @@ core      -> connector : job.updated (notifications until terminal)
 ```json
 {"jsonrpc":"2.0","id":3,"method":"jobs.submit","params":{
   "printer_id":"hp-laserjet-1018",
-  "on_behalf_of":"user_01H...",
+  "on_behalf_of":"tg:887312",
   "document":{"filename":"invoice.pdf","mime":"application/pdf","size":184320},
   "options":{"copies":1,"duplex":false,"color":false,"media":"A4"}
 }}
 ```
 
-`on_behalf_of` is honored only if the connector declared `identity: "linked"` and the link exists.
-A connector declaring `identity: "none"` must omit it, and core substitutes the configured fallback
-user. A connector cannot attribute a job to a user it has no link for, whatever it sends.
+### Whose job is it
+
+Three ways to say, and core verifies all three rather than believing any of them.
+
+| field | meaning | who uses it |
+| --- | --- | --- |
+| `session` | a signed-in person's session | the dashboard |
+| `on_behalf_of` | an external identity in **this connector's own namespace** | a connector holding a link |
+| neither | the connector's fallback user | AirPrint and anything else that cannot know |
+
+**Note what is absent: a connector cannot name a user.** It can present something that proves who
+somebody is, or say nothing. There is no third option where core takes its word.
+
+`on_behalf_of` is honoured only if the connector declared `identity: "linked"` and a link exists;
+otherwise it draws -32006. A connector declaring `identity: "none"` is refused even for an identity
+that genuinely is linked, because the declaration is not decoration: the dashboard shows it, and an
+administrator chose a fallback user on the strength of it.
+
+**Changed 2026-09-03.** An earlier draft had `on_behalf_of` carry a printer-cycle user id. That made
+a connector name a user, which core would then have had to verify anyway, and it left the dashboard
+no way to say who was printing at all, since it has no external identity for the person signed in.
 
 **jobs.commit**
 

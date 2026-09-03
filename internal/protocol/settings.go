@@ -189,3 +189,32 @@ func (s *Server) connectedIDs() map[string]bool {
 	}
 	return out
 }
+
+type fallbackParams struct {
+	ConnectorID string `json:"connector_id"`
+	UserID      string `json:"user_id"`
+}
+
+// connectorsSetFallbackUser chooses who a connector's jobs belong to when it
+// does not identify people.
+//
+// The AirPrint case. A phone on the LAN prints without authenticating, so
+// somebody has to decide whose printing that counts as. An empty user id clears
+// it, and jobs then belong to nobody in particular, which is honest rather than
+// wrong.
+func (c *conn) connectorsSetFallbackUser(ctx context.Context, params json.RawMessage) (any, error) {
+	var p fallbackParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
+	}
+
+	if err := c.db.SetConnectorFallbackUser(ctx, p.ConnectorID, p.UserID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "no such connector or user")
+		}
+		return nil, err
+	}
+
+	c.log.Info("fallback user set", "connector", p.ConnectorID, "user", p.UserID)
+	return map[string]any{"connector_id": p.ConnectorID, "user_id": p.UserID}, nil
+}

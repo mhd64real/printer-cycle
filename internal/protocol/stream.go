@@ -65,9 +65,19 @@ type stream struct {
 }
 
 type submitParams struct {
-	PrinterID  string `json:"printer_id"`
+	PrinterID string `json:"printer_id"`
+
+	// Session is a signed-in person's session, which is how the dashboard says
+	// who a job is for.
+	Session string `json:"session"`
+
+	// OnBehalfOf is an external identity in this connector's own namespace,
+	// such as "tg:887312", which is how a connector holding an identity link
+	// says who a job is for. Core resolves it: a connector does not get to name
+	// a user directly.
 	OnBehalfOf string `json:"on_behalf_of"`
-	Document   struct {
+
+	Document struct {
 		Filename string `json:"filename"`
 		MIME     string `json:"mime"`
 		Size     int64  `json:"size"`
@@ -113,10 +123,19 @@ func (c *conn) jobsSubmit(ctx context.Context, params json.RawMessage) (any, err
 		return nil, err
 	}
 
-	connector := c.authenticated()
+	connector, err := c.currentConnector(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	userID, err := c.attribute(ctx, connector, p.Session, p.OnBehalfOf)
+	if err != nil {
+		return nil, err
+	}
 
 	job, err := c.db.CreateJob(ctx, store.JobSpec{
 		PrinterID:      printer.ID,
+		UserID:         userID,
 		ConnectorID:    connector.ID,
 		Name:           p.Document.Filename,
 		DocumentFormat: format,
@@ -163,6 +182,56 @@ func (c *conn) jobsSubmit(ctx context.Context, params json.RawMessage) (any, err
 		"printer", printer.QueueName, "format", format)
 
 	return submitResult{JobID: job.ID, StreamID: s.id}, nil
+}
+
+// attribute works out whose job this is.
+//
+// Three ways, and core verifies all three rather than believing any of them.
+//
+//  1. A session. The connector holds proof the person signed in. This is how the
+//     dashboard says who is printing.
+//  2. An external identity in the connector's own namespace, resolved through a
+//     link core owns. This is how a Telegram connector says who is printing.
+//  3. Neither, in which case the job belongs to the connector's fallback user.
+//     This is the AirPrint case: a phone on the LAN prints without
+//     authenticating, because that is what AirPrint is.
+//
+// Note what is absent. A connector cannot name a user. It can present something
+// that proves who somebody is, or say nothing, and there is no third option
+// where core takes its word.
+func (c *conn) attribute(ctx context.Context, connector *store.Connector, session, externalID string) (string, error) {
+	if session != "" {
+		user, err := c.userFromSession(ctx, session)
+		if err != nil {
+			return "", err
+		}
+		return user.ID, nil
+	}
+
+	if externalID != "" {
+		// A connector that declared it does not identify people must not then
+		// claim to. The declaration is not decoration: the dashboard shows it,
+		// and an administrator chose a fallback user on the strength of it.
+		if connector.IdentityPolicy != store.IdentityLinked {
+			return "", jsonrpc.Errorf(jsonrpc.CodeIdentityNotLinked,
+				"this connector declared that it does not identify people")
+		}
+
+		link, err := c.db.ResolveIdentity(ctx, connector.ID, externalID)
+		if errors.Is(err, store.ErrNotLinked) {
+			return "", jsonrpc.Errorf(jsonrpc.CodeIdentityNotLinked,
+				"that identity is not linked to anyone")
+		}
+		if err != nil {
+			return "", err
+		}
+		return link.UserID, nil
+	}
+
+	// Nobody named. The fallback may be unset, and that is allowed: the job
+	// still exists and still prints, it simply belongs to nobody in particular
+	// until an administrator says otherwise.
+	return connector.FallbackUserID, nil
 }
 
 // checkFormat refuses a document the queue cannot handle.

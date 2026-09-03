@@ -1179,7 +1179,33 @@ depends on the loose version.
   with proves nothing about them beyond the link, which core owns and can check for itself. Nothing
   here needs to take a connector's word for who a person is.
 - **Done when:** a forged `on_behalf_of` is rejected with -32006.
-- **Status:** todo
+- **Status:** done, 2026-09-03, tested under `-race`.
+- **`on_behalf_of` was being parsed and silently ignored**, so every job was attributed to nobody.
+  Found by looking, not by a failure: nothing complained, jobs printed, and no user could see their
+  own history.
+- **Three ways to say whose job it is, all verified.** A session (the dashboard), an external identity
+  resolved through a link core owns (Telegram), or nothing at all, in which case it belongs to the
+  connector's fallback user (AirPrint). A connector cannot name a user in any of them.
+- **PROTOCOL.md changed:** `on_behalf_of` now carries an external identity rather than a user id. The
+  old form made a connector name a user, which core would have had to verify anyway, and it gave the
+  dashboard no way to say who was printing, since it has no external identity for the person signed in.
+- A connector declaring `identity: none` is refused even for an identity that genuinely is linked. The
+  declaration is not decoration: an administrator chose a fallback user on the strength of it.
+
+**A real bug the tests caught, in a place the stage was not about.** Two attribution tests failed
+because the connector was a **snapshot taken when the connection authenticated**. Anything that
+changed afterwards was invisible, which meant:
+
+- a connector registering with `identity: linked` could never use it, since the snapshot predated the
+  registration;
+- an administrator setting a fallback user had no effect until the connector reconnected;
+- **a revoked scope kept working**, and for a connector that stays connected for weeks that is
+  indistinguishable from never revoking it;
+- **a disabled connector carried on**, on its existing connection.
+
+The connector is now read from the database on every call. It costs one small query against a local
+SQLite file, which is worth less than the correctness. Two tests pin the security halves: revoking a
+scope and disabling a connector both take effect at once, on a connection that is already open.
 
 ---
 
@@ -1597,3 +1623,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   8a, and `identity.approve` rewritten to take a session. Worth noting the permission it needs got
   smaller, not larger: it had required `users.manage` to make trusting a connector's claim an explicit
   administrative decision, and once the claim is checked rather than trusted, `identity.link` suffices.
+- **2026-09-03, after Stage 40:** discovered that connector state was cached for the life of a
+  connection, so revoked scopes and disabled connectors kept working. Now read fresh per call. Also
+  changed `on_behalf_of` in PROTOCOL.md from a user id to an external identity, which removes the last
+  place a connector could name a person.

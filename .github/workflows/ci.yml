@@ -16,6 +16,27 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The interface is compiled into the dashboard, so a build that has not
+      # built it produces a binary that cannot serve anything.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: install interface dependencies
+        run: make web-install
+
+      - name: typecheck the interface
+        run: cd web && pnpm typecheck
+
+      - name: build the interface
+        run: cd web && pnpm build
+
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"

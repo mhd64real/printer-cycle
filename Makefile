@@ -12,16 +12,24 @@ LDFLAGS := -s -w -X $(MODULE)/internal/version.Version=$(VERSION)
 BINARIES  := core dashboard
 PLATFORMS := linux/arm64 linux/amd64 linux/arm
 
-.PHONY: all build build-all check vet fmt test test-integration measure clean dev-up dev-down dev-logs dev-shell dev-printers
+.PHONY: all build build-all check vet fmt test test-integration measure clean web web-install dev-up dev-down dev-logs dev-shell dev-printers
 
 all: build
 
-build:
+# The interface is compiled into the dashboard, so building the binaries builds
+# it first. A dashboard without its interface is not a dashboard.
+web-install:
+	cd web && pnpm install --frozen-lockfile
+
+web:
+	cd web && pnpm install --silent && pnpm build
+
+build: web
 	@mkdir -p bin
 	CGO_ENABLED=0 $(GO) build -ldflags '$(LDFLAGS)' -o bin/ ./cmd/...
 	@ls -1 bin/
 
-build-all:
+build-all: web
 	@rm -rf dist && mkdir -p dist
 	@for platform in $(PLATFORMS); do \
 		os=$${platform%%/*}; arch=$${platform##*/}; \

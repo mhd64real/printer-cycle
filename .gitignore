@@ -10,8 +10,13 @@ coverage.out
 
 # Frontend
 node_modules/
-web/dist/
 web/.vite/
+
+# Built interface. The directory itself is kept, with a placeholder, so that
+# `go build` works for somebody who has not run the frontend build: go:embed
+# fails outright on a directory that does not exist.
+web/dist/*
+!web/dist/.gitkeep
 
 # Local databases
 *.db

@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+/* Design tokens.
+ *
+ * Defined here rather than inline anywhere, so a change lands everywhere at
+ * once. Light and dark are both defined: this runs on somebody's own hardware
+ * and they did not choose printer-cycle's opinion about their screen. */
+@theme {
+  --color-paper: #fbfaf8;
+  --color-ink: #1c1a17;
+  --color-muted: #6b665e;
+  --color-line: #e6e2db;
+  --color-accent: #3f6f4f;
+  --color-warn: #9a5b2c;
+  --color-danger: #9b3b34;
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  body {
+    @apply bg-[--color-paper] text-[--color-ink] antialiased;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+}

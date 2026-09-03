@@ -16,10 +16,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -28,6 +31,7 @@ import (
 
 	"github.com/mhd64real/printer-cycle/internal/connector"
 	"github.com/mhd64real/printer-cycle/internal/version"
+	"github.com/mhd64real/printer-cycle/web"
 )
 
 func main() {
@@ -118,8 +122,68 @@ type dashboard struct {
 func (d *dashboard) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", d.health)
-	mux.HandleFunc("/", d.placeholder)
+
+	if !web.Built() {
+		// Building the Go binary without building the interface is easy to do
+		// while working on core, and meeting the result as a wall of 404s would
+		// waste somebody's afternoon.
+		d.log.Warn("no interface compiled in; run: make web")
+		mux.HandleFunc("/", d.notBuilt)
+		return mux
+	}
+
+	assets, err := web.Assets()
+	if err != nil {
+		d.log.Error("cannot read the compiled interface", "error", err)
+		mux.HandleFunc("/", d.notBuilt)
+		return mux
+	}
+	mux.Handle("/", spaHandler{files: http.FS(assets), fs: assets})
 	return mux
+}
+
+// spaHandler serves the built interface, falling back to index.html.
+//
+// The interface routes in the browser, so a reload on /printers asks this server
+// for a path no file matches. Answering with index.html lets the page render and
+// decide for itself, which is what makes a bookmark or a refresh work.
+//
+// Anything under /assets is exempt: those are real files, and quietly returning
+// HTML for a missing script would turn a broken build into a blank page with no
+// explanation.
+type spaHandler struct {
+	files http.FileSystem
+	fs    fs.FS
+}
+
+func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	upath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+	if upath == "" {
+		upath = "index.html"
+	}
+
+	if _, err := fs.Stat(h.fs, upath); err == nil {
+		http.FileServer(h.files).ServeHTTP(w, r)
+		return
+	}
+
+	if strings.HasPrefix(upath, "assets/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	index, err := h.fs.Open("index.html")
+	if err != nil {
+		http.Error(w, "interface unavailable", http.StatusInternalServerError)
+		return
+	}
+	defer index.Close()
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Not cached: the page names hashed asset files, so a stale copy points at
+	// files a new build no longer has.
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.Copy(w, index)
 }
 
 // health reports whether the dashboard can reach core, which is the first
@@ -136,28 +200,19 @@ func (d *dashboard) health(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(status)
 }
 
-func (d *dashboard) placeholder(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-
-	state := "connected to core"
-	if !d.client.Connected() {
-		state = "not connected to core"
-	}
-
+func (d *dashboard) notBuilt(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<!doctype html>
+	w.WriteHeader(http.StatusServiceUnavailable)
+	fmt.Fprint(w, `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>printer-cycle</title></head>
 <body>
 <h1>printer-cycle</h1>
-<p>%s.</p>
-<p>The interface is not built yet. See PLAN.md, phase 5.</p>
+<p>This binary was built without its interface.</p>
+<p>Run <code>make web</code> and build again.</p>
 </body>
 </html>
-`, state)
+`)
 }
 
 func (d *dashboard) onNotify(method string, params json.RawMessage) {

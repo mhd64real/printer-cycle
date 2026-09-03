@@ -2,6 +2,8 @@ package protocol
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -196,4 +198,44 @@ func (c *conn) userFromSession(ctx context.Context, token string) (store.User, e
 		return store.User{}, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated, "that session is not valid")
 	}
 	return user, err
+}
+
+type enrolParams struct {
+	Token     string `json:"token"`
+	PublicKey string `json:"public_key"`
+}
+
+// enrol registers a connector's public key against a single-use token.
+//
+// Callable before authenticating, necessarily: a connector on its first run has
+// no key core knows about, so it has nothing to authenticate with. What gates it
+// is the token, which an administrator issued and which is spent on use.
+//
+// Core stores only the public key, so what is being handed over here is not a
+// secret and a listener learns nothing useful from it.
+func (c *conn) enrol(ctx context.Context, params json.RawMessage) (any, error) {
+	var p enrolParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
+	}
+
+	key, err := base64.StdEncoding.DecodeString(p.PublicKey)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams,
+			"public_key must be a base64 ed25519 public key")
+	}
+
+	connector, err := c.db.Enrol(ctx, p.Token, ed25519.PublicKey(key))
+	if errors.Is(err, store.ErrEnrolmentInvalid) {
+		c.log.Warn("an enrolment token was refused")
+		// Unknown, expired and already-used tokens are indistinguishable, so
+		// somebody guessing learns nothing about which guess came closest.
+		return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated, "that enrolment token is not valid")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	c.log.Info("connector enrolled", "connector", connector.ID, "enabled", connector.Enabled)
+	return map[string]any{"connector_id": connector.ID, "enabled": connector.Enabled}, nil
 }

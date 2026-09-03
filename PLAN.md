@@ -1215,7 +1215,30 @@ scope and disabling a connector both take effect at once, on a connection that i
 - Connects to core as a connector, handles the handshake, serves static files, holds the token so
   the browser never sees it.
 - **Done when:** it registers itself against a running core and serves a placeholder page.
-- **Status:** todo
+- **Status:** done, 2026-09-03. Verified by running both binaries together from empty directories:
+
+```
+dashboard starting
+not known to core yet, enrolling
+enrolled with core, connecting
+connected to core
+```
+
+**A gap the stage uncovered: there was no way for a connector to enrol over the protocol.** Stage 24
+built the storage and the token, and no method exposed it, so a fresh dashboard could generate a key
+and never register it. Added `enrol`, callable before authenticating, gated by the token, granting no
+access by itself. A test pins that last part.
+
+- **The connector key never leaves the dashboard process.** A browser tab cannot act as the dashboard
+  even if somebody points one at core directly, which is what makes the dashboard a connector rather
+  than a privileged path.
+- **`internal/connector` is the connector side of the protocol**, reusable and unprivileged. Stage 62's
+  example connector will not use it: the point of that example is to show the protocol is
+  implementable in fifty lines by somebody who has never seen this repository.
+- The client reconnects with backoff, because core restarting and the machine sleeping are ordinary,
+  and a connector needing a person to notice and restart it is not.
+- **Enrolling is reported as a step rather than a fault.** It first logged as a disconnection, which
+  would have made somebody's first experience of the software look like something had gone wrong.
 
 ### Stage 42: Frontend scaffold
 - Vite, React, TypeScript, Tailwind v4, shadcn/ui. Built output embedded with `go:embed`.
@@ -1627,3 +1650,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   connection, so revoked scopes and disabled connectors kept working. Now read fresh per call. Also
   changed `on_behalf_of` in PROTOCOL.md from a user id to an external identity, which removes the last
   place a connector could name a person.
+- **2026-09-03, after Stage 41:** added the `enrol` protocol method, which the spec described in prose
+  and never defined. Without it a connector's first run could not complete, which had gone unnoticed
+  because nothing had run a connector's first run until now.

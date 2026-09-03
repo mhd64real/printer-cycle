@@ -348,8 +348,14 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 // it is. Refusing by default rather than permitting by default means a method
 // added later without a permission check fails closed.
 func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage) (any, error) {
-	if method == "authenticate" {
+	// Two methods work before a connection has proved anything, and both are
+	// gated by something the caller must already hold: a single-use enrolment
+	// token, or a signature over this connection's nonce.
+	switch method {
+	case "authenticate":
 		return c.authenticate(ctx, params)
+	case "enrol":
+		return c.enrol(ctx, params)
 	}
 
 	// One gate, ahead of every handler. Authentication, existence and permission

@@ -158,9 +158,24 @@ prefix costs nothing and closes that off.
 
 **Enrolment, since a new connector has nothing to sign with yet.** The admin adds the connector in
 the dashboard, which issues a single-use enrolment token. The connector generates its keypair on
-first run, presents the token together with its public key, and core records the key and spends the
-token. From then on it signs nonces. An admin who prefers it can paste a public key in directly
-instead; the token exists for convenience, not as a second trust path.
+first run and presents the token together with its public key:
+
+```json
+{"jsonrpc":"2.0","id":0,"method":"enrol","params":{
+  "token":"PCE-VYVA0-M3YXJ-3Z34F-XY4GN",
+  "public_key":"base64 ed25519 public key"
+}}
+```
+
+`enrol` is one of two methods callable before authenticating, and what gates it is the token, which
+an administrator issued and which is spent on use. It grants no access by itself: a connection that
+has enrolled and not authenticated can still do nothing.
+
+**The authentication challenge is spent by the failed attempt that preceded it**, so a connector
+enrols and then reconnects to authenticate with a fresh nonce. That is one extra connection on a
+first run and never again.
+
+Unknown, expired and already-used tokens are refused identically.
 
 Honest limit: this authenticates the connection, not each later message, and it does not stop an
 active man in the middle. TLS stays available for anyone who wants it, as a deployment option rather

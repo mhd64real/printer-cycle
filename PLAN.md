@@ -1243,7 +1243,27 @@ access by itself. A test pins that last part.
 ### Stage 42: Frontend scaffold
 - Vite, React, TypeScript, Tailwind v4, shadcn/ui. Built output embedded with `go:embed`.
 - **Done when:** `make build` produces one binary containing the whole frontend.
-- **Status:** todo
+- **Status:** done, 2026-09-03. `make build` builds the interface and then the binaries; the dashboard
+  is 7.2MB and serves the page from inside itself.
+- **`make build` depends on the interface**, so a dashboard without one cannot be produced by
+  forgetting a step. CI installs pnpm, typechecks the interface, and builds it.
+- **`//go:embed all:dist`, with the `all:` prefix deliberately.** A plain embed silently skips files
+  beginning with a dot or an underscore, which is the kind of omission that surfaces as one missing
+  file in production and nowhere else.
+- **`web/dist/.gitkeep` is committed.** `go:embed` fails outright on a directory that does not exist,
+  so without it `go build` breaks for anybody who has not run the frontend build. The built output
+  itself stays ignored.
+- **A binary built without its interface says so**, rather than answering every request with a 404.
+  That state is easy to reach while working on core, and a wall of 404s explains nothing.
+- **Browser routes fall back to index.html, and `/assets` does not.** A reload on `/printers` has to
+  render the page, but quietly returning HTML for a missing script would turn a broken build into a
+  blank screen with no error anywhere. Verified both ways: `/printers` returns 200,
+  `/assets/nope.js` returns 404.
+- The page is served with `no-store`: it names hashed asset files, so a cached copy points at files a
+  new build no longer has.
+- Design tokens live in one `@theme` block rather than inline, and both light and dark are defined:
+  this runs on somebody's own hardware and they did not choose printer-cycle's opinion about their
+  screen.
 
 ### Stage 43: Browser to dashboard session layer
 - Browser talks HTTP to the dashboard binary; the dashboard relays to core over the socket with its
@@ -1653,3 +1673,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-09-03, after Stage 41:** added the `enrol` protocol method, which the spec described in prose
   and never defined. Without it a connector's first run could not complete, which had gone unnoticed
   because nothing had run a connector's first run until now.
+- **2026-09-03, after Stage 42:** the frontend is in the build path rather than beside it. Committed
+  `web/dist/.gitkeep` because `go:embed` cannot point at a directory that does not exist, which would
+  otherwise break `go build` for anyone without node.

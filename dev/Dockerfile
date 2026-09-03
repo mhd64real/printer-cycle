@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ghostscript \
       avahi-daemon \
       avahi-utils \
+      libnss-mdns \
       dbus \
       foomatic-db-engine \
       foomatic-db-compressed-ppds \
@@ -37,6 +38,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # FileDevice lives in cups-files.conf, not cupsd.conf, since CUPS 1.6. Stage 8
 # needs it so queues can write to a file and output can be checked byte for byte.
 RUN echo "FileDevice Yes" >> /etc/cups/cups-files.conf
+
+# Resolve .local names, not merely discover them.
+#
+# Avahi lets CUPS find a printer over mDNS; resolving the .local hostname it
+# comes back with is a separate thing, done by the name service switch. Without
+# this, discovery works, pairing gets as far as CUPS trying to reach the printer,
+# and fails with "Temporary failure in name resolution" several seconds later.
+#
+# A desktop Linux install has this by default. A container does not, and neither
+# does a minimal server install, which is what a Raspberry Pi usually is: the
+# installer has to add it too.
+RUN sed -i "s/^hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/" /etc/nsswitch.conf
 
 COPY cupsd.conf /etc/cups/cupsd.conf
 

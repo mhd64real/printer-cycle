@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -56,6 +57,11 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Declared before the client so the client can hand it notifications, and
+	// given its client immediately afterwards. Neither can be built without the
+	// other, and this is the smaller knot.
+	var web *dashboard.Server
+
 	client, err := connector.New(connector.Options{
 		ID:         "dashboard",
 		CoreURL:    *coreURL,
@@ -63,10 +69,14 @@ func run() error {
 		SetupToken: tokenFrom(*setupToken),
 		Manifest:   manifest(),
 		Logger:     log,
+		OnNotify: func(method string, params json.RawMessage) {
+			web.HandleNotification(method, params)
+		},
 	})
 	if err != nil {
 		return err
 	}
+	web = dashboard.New(client, log)
 
 	go func() {
 		if err := client.Run(ctx); err != nil && ctx.Err() == nil {
@@ -76,7 +86,7 @@ func run() error {
 
 	httpServer := &http.Server{
 		Addr:              *listenAddr,
-		Handler:           dashboard.New(client, log).Handler(),
+		Handler:           web.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

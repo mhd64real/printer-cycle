@@ -1332,7 +1332,41 @@ a core that answers however a test needs rather than against a running one.
 - Progressive list, USB and LAN together, one pair button per device, the recommended driver named
   in plain words.
 - **Done when:** a discovered virtual queue is paired in one click.
-- **Status:** todo
+- **Status:** done, 2026-09-04. Verified by driving a browser at the running stack and looking at the
+  result, which is how three of the four findings below were found at all.
+- **Server-sent events were built here**, because progressive discovery reaches the dashboard and
+  stops. Without a push channel to the page, the screen would spin for eight seconds and then show
+  everything at once, which is the exact experience the streaming work existed to avoid. Stage 49
+  needs the same channel for job progress.
+- A page that falls behind is skipped rather than waited for: these are updates, not instructions, and
+  the next supersedes the last.
+- Connections are described in words. "Plugged in over USB", not `usb://`.
+
+**Four things found by looking at the screen. None would have failed a test.**
+
+**One printer appeared three times.** A modern printer advertises itself as `_ipp._tcp`,
+`_ipps._tcp` and `_printer._tcp`, and all three were offered as separate things to pair with,
+identically named. Now collapsed, conservatively: only a shared DNS-SD service name or UUID counts as
+proof, because showing one printer twice is untidy and hiding one of two is worse.
+
+**The first version of that collapsing split the same printer in two**, because it keyed on the UUID
+where present and only some announcements carry one. The service name is the identifier every
+announcement shares.
+
+**Pairing a network printer failed after twenty-four seconds** with "the printing system is not
+answering". The cause was not in printer-cycle: the container could **discover** `.local` names
+without being able to **resolve** them, so CUPS found the printer and then could not reach it.
+`libnss-mdns` fixes it. **A minimal server install has the same gap**, which a Raspberry Pi usually
+is, so Stage 58 has to install it too.
+
+**And I blamed that failure on the wrong thing first.** The code briefly carried a confident comment
+saying CUPS had refused the printer's self-signed certificate. It had not; pairing over `ipps` works
+fine once names resolve. The transport preference stays because it is still the safer default, but
+the explanation attached to it has been corrected. A wrong explanation in a comment outlives the
+person who wrote it.
+
+- **Pairing a driverless printer takes about twelve seconds**, because CUPS interrogates it to build a
+  driver. The screen says so while it waits rather than showing a button that appears stuck.
 
 ### Stage 47: Manual add on the same page
 - Type an IP, or paste a full URI for experts.
@@ -1418,6 +1452,12 @@ a core that answers however a test needs rather than against a running one.
 
 ### Stage 58: Install CUPS and every driver
 - Driver-only split packages, never the full vendor suites.
+- **`libnss-mdns` is required, found at Stage 46.** Avahi lets CUPS *discover* a printer over mDNS;
+  *resolving* the `.local` hostname that comes back is a separate thing done by the name service
+  switch. Without it, discovery works, pairing gets as far as CUPS trying to reach the printer, and
+  fails after twenty-odd seconds with "Temporary failure in name resolution". A desktop Linux install
+  has it; a minimal server install does not, and a Raspberry Pi is usually the latter. The installer
+  must add it and set `hosts:` in `/etc/nsswitch.conf`.
 - Expect `lpadmin` to print a driver deprecation warning on every queue creation. It is noise, not a
   failure, on CUPS 2.4.x. The install script should not treat it as an error, and the dashboard
   should not surface it to users.
@@ -1731,3 +1771,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-09-03, after Stage 44:** Stage 45 absorbed. Verified the screens by screenshotting them
   through headless Chrome rather than assuming markup implies appearance, which is worth the two
   minutes on anything a person actually looks at.
+- **2026-09-04, after Stage 46:** added server-sent events, which Stage 49 also needs. Recorded
+  `libnss-mdns` as an installer requirement against Stage 58. Corrected a comment that confidently
+  blamed a pairing failure on TLS when the cause was name resolution; the fix it justified was kept,
+  the reasoning was not.

@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
-	"sync/atomic"
+	"sync"
 
 	"github.com/mhd64real/printer-cycle/internal/version"
 	"github.com/mhd64real/printer-cycle/web"
@@ -36,7 +36,8 @@ type Server struct {
 	client Caller
 	log    *slog.Logger
 
-	connected atomic.Bool
+	subsMu sync.RWMutex
+	subs   map[*subscriber]struct{}
 }
 
 // New builds the server.
@@ -57,6 +58,7 @@ func (d *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/logout", d.logout)
 	mux.HandleFunc("/api/me", d.me)
 	mux.HandleFunc("/api/call", d.call)
+	mux.HandleFunc("/api/events", d.events)
 
 	if !web.Built() {
 		// Building the Go binary without building the interface is easy to do

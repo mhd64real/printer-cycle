@@ -275,3 +275,25 @@ func TestARefusedSignInSaysNothingUseful(t *testing.T) {
 		}
 	}
 }
+
+// Core's errors are addressed half to a program and half to a person. What
+// reaches a screen should be only the second half.
+func TestErrorsReachThePageWithoutProtocolNoise(t *testing.T) {
+	srv, core := testServer(t)
+	jar := signInAndKeepCookie(t, srv, core)
+
+	core.err["printers.add"] = errors.New("jsonrpc: -32602 no driver claims this printer")
+
+	body, _ := json.Marshal(map[string]any{"method": "printers.add", "params": map[string]any{}})
+	resp := post(t, srv, jar, "/api/call", string(body))
+
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error != "no driver claims this printer" {
+		t.Errorf("error = %q, want the sentence without the protocol wrapper", payload.Error)
+	}
+}

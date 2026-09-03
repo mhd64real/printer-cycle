@@ -1,62 +1,76 @@
 import { useEffect, useState } from "react";
 
-type Health = {
-  version: string;
-  core_connected: boolean;
-};
+import { Setup } from "@/screens/Setup";
+import { SignIn } from "@/screens/SignIn";
+import { SignedIn } from "@/screens/SignedIn";
+import { api, type User } from "@/api";
 
-/**
- * The whole interface, for now.
- *
- * It exists to prove one thing: that the page is served from inside the binary
- * and can reach the dashboard process behind it. Screens arrive from stage 44.
- */
+type State =
+  | { kind: "loading" }
+  | { kind: "setup" }
+  | { kind: "signin" }
+  | { kind: "in"; user: User }
+  | { kind: "unreachable" };
+
 export default function App() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
-    fetch("/healthz")
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => setFailed(true));
+    void decideWhereToStart().then(setState);
   }, []);
 
-  return (
-    <main className="mx-auto max-w-xl px-6 py-16">
-      <h1 className="text-2xl font-semibold tracking-tight">printer-cycle</h1>
+  switch (state.kind) {
+    case "loading":
+      return <Centred>Checking this box.</Centred>;
 
-      <p className="mt-2 text-[--color-muted]">
-        A print server for old printers, and for printers whose software is
-        worse than the hardware.
-      </p>
+    case "unreachable":
+      return (
+        <Centred>
+          The dashboard cannot reach printer-cycle. It may still be starting.
+        </Centred>
+      );
 
-      <dl className="mt-8 divide-y divide-[--color-line] border-y border-[--color-line] text-sm">
-        <Row label="Interface">served from inside the binary</Row>
-        <Row label="Core">
-          {failed
-            ? "cannot reach the dashboard process"
-            : health
-              ? health.core_connected
-                ? "connected"
-                : "not connected"
-              : "checking"}
-        </Row>
-        <Row label="Version">{health?.version ?? "unknown"}</Row>
-      </dl>
+    case "setup":
+      return <Setup onDone={(user) => setState({ kind: "in", user })} />;
 
-      <p className="mt-8 text-sm text-[--color-muted]">
-        The screens are not built yet. See PLAN.md, phase 5.
-      </p>
-    </main>
-  );
+    case "signin":
+      return <SignIn onDone={(user) => setState({ kind: "in", user })} />;
+
+    case "in":
+      return <SignedIn user={state.user} onSignOut={() => setState({ kind: "signin" })} />;
+  }
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * Works out which of three situations somebody is in.
+ *
+ * Asked in this order deliberately. A box with no accounts needs setting up
+ * whether or not a stale cookie is lying around, and a stale cookie is exactly
+ * what somebody has after reinstalling.
+ */
+async function decideWhereToStart(): Promise<State> {
+  try {
+    const { needs_setup } = await api.needsSetup();
+    if (needs_setup) {
+      return { kind: "setup" };
+    }
+  } catch {
+    return { kind: "unreachable" };
+  }
+
+  try {
+    const { user } = await api.me();
+    return { kind: "in", user };
+  } catch {
+    // Not signed in, which is the ordinary case rather than a failure.
+    return { kind: "signin" };
+  }
+}
+
+function Centred({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex justify-between gap-6 py-3">
-      <dt className="text-[--color-muted]">{label}</dt>
-      <dd className="text-right">{children}</dd>
-    </div>
+    <main className="mx-auto flex min-h-dvh max-w-md items-center justify-center px-6 text-muted">
+      <p>{children}</p>
+    </main>
   );
 }

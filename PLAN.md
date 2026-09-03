@@ -1301,13 +1301,32 @@ a core that answers however a test needs rather than against a running one.
 ### Stage 44: First-run setup screen
 - Consume the setup token, create the first admin, land logged in.
 - **Done when:** a fresh install is usable from a browser with no terminal step after install.
-- **Status:** todo
+- **Status:** done, 2026-09-03. Verified by running both binaries from empty directories and driving
+  a browser at them; screenshots checked rather than inferred.
+- **Stage 45 is absorbed into this one.** Setup, sign-in and sign-out are one experience, and shipping
+  a setup screen that lands somebody at a half-built sign-in would be worse than doing both.
+- **There is no setup token to type.** Core printed one and the dashboard already spent it proving it
+  belongs on this machine. Asking a person to retype it would prove nothing further and would only be
+  another chance to mistype something.
+- **Setup signs you in with the credentials just chosen**, rather than making somebody prove a second
+  later what they demonstrated a second ago.
+- **The order of questions matters.** "Does this box need setting up" is asked before "is anybody
+  signed in", because a reinstalled box needs setting up whether or not a stale cookie is lying
+  around, and a stale cookie is exactly what somebody has after reinstalling.
+- **Errors reach the page without their protocol wrapper.** Core answers "jsonrpc: -32002 this box
+  already has an account", where the first two words are addressed to a program and the rest to a
+  person. Only the second half belongs on a screen.
+- Both colour schemes are implemented and the dark one is what the screenshots show, since this runs
+  on somebody's own hardware and they did not choose printer-cycle's opinion about their screen.
+- Focus outlines are kept: this is software somebody sets up once and returns to rarely, so nothing
+  in it should demand a mouse.
 
 ### Stage 45: Login and logout
-- **The server half landed in Stage 43**, which needed sessions to exist before it could relay
-  anything. What is left here is the screen.
+- **Absorbed into Stage 44.** The server half landed in Stage 43, which needed sessions before it
+  could relay anything, and the screens landed in Stage 44, because setup that leads to a half-built
+  sign-in is not something to ship even for one stage.
 - **Done when:** sessions survive a page reload and expire sensibly.
-- **Status:** todo
+- **Status:** done, 2026-09-03, as part of Stage 44
 
 ### Stage 46: Printers page, discovery and pairing
 - Progressive list, USB and LAN together, one pair button per device, the recommended driver named
@@ -1709,3 +1728,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   setup token promises could not be created by anything. It carries core's first per-person rule, as
   distinct from a per-connector scope. Moved the dashboard's HTTP layer out of `package main` into
   `internal/dashboard` so its security properties could be tested rather than asserted in prose.
+- **2026-09-03, after Stage 44:** Stage 45 absorbed. Verified the screens by screenshotting them
+  through headless Chrome rather than assuming markup implies appearance, which is worth the two
+  minutes on anything a person actually looks at.

@@ -2,26 +2,51 @@
 
 /* Design tokens.
  *
- * Defined here rather than inline anywhere, so a change lands everywhere at
- * once. Light and dark are both defined: this runs on somebody's own hardware
- * and they did not choose printer-cycle's opinion about their screen. */
+ * Defined once, here. A value written inline is a value that has to be found
+ * again later, and there is always more of it than expected.
+ *
+ * Both schemes are defined because this runs on somebody's own hardware and
+ * they did not choose printer-cycle's opinion about their screen. */
 @theme {
   --color-paper: #fbfaf8;
+  --color-raised: #ffffff;
   --color-ink: #1c1a17;
   --color-muted: #6b665e;
   --color-line: #e6e2db;
   --color-accent: #3f6f4f;
-  --color-warn: #9a5b2c;
+  --color-accent-ink: #ffffff;
   --color-danger: #9b3b34;
+  --color-danger-bg: #fdf3f2;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-paper: #16150f;
+    --color-raised: #1e1d16;
+    --color-ink: #f1eee7;
+    --color-muted: #a09a8e;
+    --color-line: #33312a;
+    --color-accent: #7fae8a;
+    --color-accent-ink: #10160f;
+    --color-danger: #e2867d;
+    --color-danger-bg: #2a1b19;
+  }
 }
 
 @layer base {
-  :root {
+  html {
     color-scheme: light dark;
   }
 
   body {
-    @apply bg-[--color-paper] text-[--color-ink] antialiased;
+    @apply bg-paper text-ink antialiased;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  /* Visible focus, always. Removing it makes a page unusable by keyboard, and
+   * printer-cycle is the sort of thing somebody sets up once and returns to
+   * rarely, so nothing here should demand a mouse. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
   }
 }

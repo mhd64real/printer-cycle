@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -222,7 +223,7 @@ func (d *Server) call(w http.ResponseWriter, r *http.Request) {
 	var result json.RawMessage
 	if err := d.client.Call(ctx, req.Method, params, &result); err != nil {
 		d.log.Debug("core refused a relayed call", "method", req.Method, "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		writeJSONError(w, http.StatusBadRequest, humanise(err))
 		return
 	}
 
@@ -289,7 +290,7 @@ func (d *Server) setup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// The reason is the person's to act on: a password too short, a name
 		// already taken, or setup already finished.
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		writeJSONError(w, http.StatusBadRequest, humanise(err))
 		return
 	}
 
@@ -311,4 +312,29 @@ func (d *Server) needsSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"needs_setup": len(out.Users) == 0})
+}
+
+// humanise strips the protocol wrapper off an error before a person reads it.
+//
+// Core's errors arrive as "jsonrpc: -32002 this box already has an account",
+// where the first two words are addressed to a program and the rest to a person.
+// Showing the whole thing on a screen puts a number in front of a sentence
+// somebody was meant to simply read.
+func humanise(err error) string {
+	message := err.Error()
+	message = strings.TrimPrefix(message, "jsonrpc: ")
+
+	// Then the code, if one is there: a minus sign, digits, one space.
+	if strings.HasPrefix(message, "-") {
+		if i := strings.IndexByte(message, ' '); i > 1 {
+			if _, convErr := strconv.Atoi(message[:i]); convErr == nil {
+				message = message[i+1:]
+			}
+		}
+	}
+
+	if message == "" {
+		return "something went wrong"
+	}
+	return message
 }

@@ -1415,6 +1415,55 @@ halves were verified against the address each can actually reach.
 ### Stage 48: Print page
 - Choose printer, upload a file, set copies, duplex, colour, and media, submit.
 - **Done when:** a PDF chosen in the browser prints to the file-backed queue.
+- **Status:** done, 2026-09-04. A PDF chosen in a real browser came out of the file-backed queue as
+  167KB of PostScript with its text intact, having gone through the dashboard, core, CUPS and
+  Ghostscript on the way.
+- **Printing does not go through /api/call.** The relay carries JSON and a document is bytes, so
+  there is a dedicated endpoint that streams the upload straight into the binary frames the protocol
+  already defines. The document is never assembled: not in the browser's request, not in the
+  dashboard, not in core. It moves 64KB at a time from the upload into a frame and out.
+- `jobs.submit` and `jobs.commit` came **off** the browser allowlist as part of this. They are two
+  ends of a sequence whose middle is binary frames, so a page could only ever have used them to open
+  a stream it could not feed: a job stuck half-made until the sweeper collected it a minute later,
+  and as many at once as the page asked for.
+- The connector client gained `SendDocument`, which is what any connector needs to send anything. It
+  computes the digest as the bytes go past rather than reading the document twice, because an upload
+  arriving over HTTP is readable exactly once.
+- **Options are three-state, not two.** "As the printer is set" is the default and is not the same as
+  off. A printer configured to print double-sided should keep doing that for somebody who never
+  touched the control, so an untouched option is not sent at all.
+- Tabs were added here, because a print page needs somewhere to live. Later stages hang off the same
+  bar.
+
+**A tab and a button both said "Print".** The browser driver clicked the tab, and the screenshot
+showed a form that looked filled in and had done nothing. The pages were also repeating their own
+name as a heading directly under the tab that already said it, which is where the collision came
+from. Headings removed.
+
+**The screenshot helper had assumed signing in means no submit button is left on screen.** True until
+the first screen behind the form had a submit button of its own, at which point every run timed out.
+It now waits for the signed-in chrome to appear rather than for the form to disappear. Absence is a
+poor thing to wait for.
+
+**Observed once, not reproduced:** `TestPrintJobThroughTheFilterChain` timed out after 60s in a full
+run, having taken 0.3s a moment earlier and in two full runs since. cupsd had just processed the
+browser-submitted job. Nothing was left behind to explain it, no pending jobs and no disabled queue,
+and no cause was found. Recorded rather than explained away, and rather than papering over it by
+raising the timeout.
+
+### Stage 48b: Choosing a driver by hand (ADDED 2026-09-04)
+- A printer whose model cannot be worked out automatically currently has no path through the
+  dashboard at all: `printers.driverCandidates` exists in the API and nothing calls it.
+- Found while verifying Stage 48. Core used to ask CUPS for a driverless queue whatever the
+  transport, which is CUPS interrogating the printer over IPP. A JetDirect or LPD box cannot answer
+  that, so adding one produced a queue CUPS then failed to configure and an error saying only that
+  the printing system was not answering. Core now refuses those and says a driver has to be chosen,
+  which is honest but leaves the user nowhere to go until this stage exists.
+- **This is the printer the project exists for.** An old machine found by SNMP with no device id is
+  the exact case the pitch is about, and it is the one case the one-click flow cannot serve.
+- Show the candidate list when automatic selection cannot decide, marking the recommended one and
+  saying plainly which need a proprietary plugin.
+- **Done when:** a socket printer with no device id can be added from the dashboard.
 - **Status:** todo
 
 ### Stage 49: Jobs page with live status
@@ -1819,3 +1868,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   add now undoes the CUPS side as well as its own record: the printing system can fail *after*
   creating a queue, and rolling back only half of that leaves orphans nothing can reach. Two of the
   three bugs this stage came from looking at the screen and at CUPS after an error, not from a test.
+- **2026-09-04, after Stage 48:** printing got its own endpoint rather than going through the JSON
+  relay, and `jobs.submit`/`jobs.commit` came off the browser allowlist because a page can only
+  half-use them. Added Stage 48b: core now refuses to guess a driver for a transport it cannot
+  interrogate, which is correct and leaves the oldest printers with nowhere to go until the
+  dashboard can offer the candidate list.

@@ -33,8 +33,7 @@ export function Printers() {
   return (
     <section className="space-y-6">
       <header className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-medium">Printers</h2>
-        {!adding ? <Button onClick={() => setAdding(true)}>Add a printer</Button> : null}
+          {!adding ? <Button onClick={() => setAdding(true)}>Add a printer</Button> : null}
       </header>
 
       {error ? <Notice>{error}</Notice> : null}

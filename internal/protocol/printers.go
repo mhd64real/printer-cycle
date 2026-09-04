@@ -171,10 +171,22 @@ func (c *conn) printersAdd(ctx context.Context, params json.RawMessage) (any, er
 		}
 		ppd = chosen
 		autoChosen = clean
-	default:
-		// No driver and nothing to choose from. A driverless IPP printer needs
-		// none, so this is not an error: CUPS is told to work it out.
+	case canDeriveDriver(p.DeviceURI):
+		// A driverless IPP printer needs no driver, so a device that says
+		// nothing about itself is not an error: CUPS is told to ask it.
 		ppd = "everywhere"
+	default:
+		// Anything else, refused here rather than attempted.
+		//
+		// "everywhere" is CUPS interrogating the printer over IPP to build a
+		// driver from what it answers. A socket, LPD or file device cannot
+		// answer that, so sending them down this path produced a queue CUPS
+		// then failed to configure, and an error saying only that the printing
+		// system was not answering. That is precisely the old printer this
+		// project exists for: found by SNMP, no device id, nothing else to go
+		// on. Saying what is actually needed beats failing obscurely.
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams,
+			"this printer did not say what model it is, so a driver has to be chosen by hand")
 	}
 
 	// The database row first, which reserves the queue name. A failure here
@@ -308,4 +320,21 @@ func viewOfPrinter(p store.Printer, autoChosen bool) printerView {
 		Restricted: p.Restricted,
 		AutoChosen: autoChosen,
 	}
+}
+
+// canDeriveDriver reports whether CUPS can build a driver by asking the device.
+//
+// Only the transports that speak IPP. CUPS derives an "everywhere" driver by
+// querying the printer for its capabilities, which a socket, LPD, serial or
+// file device has no way to answer.
+func canDeriveDriver(uri string) bool {
+	scheme, _, ok := strings.Cut(uri, "://")
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(scheme) {
+	case "ipp", "ipps", "dnssd":
+		return true
+	}
+	return false
 }

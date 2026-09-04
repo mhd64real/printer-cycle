@@ -456,6 +456,17 @@ Two signals arrive inside `ppd-make-and-model` and both are ranking inputs:
 Passing a ppd explicitly is the manual override. Core issues `CUPS-Add-Modify-Printer` and returns
 the printer id. Requires `printers.manage`.
 
+**With no `ppd` and no `device_id`, the transport decides.** For `ipp`, `ipps` and `dnssd` core asks
+CUPS to derive a driverless queue, because those printers can be asked what they can do. For
+`socket`, `lpd`, `serial` and `file` it refuses and says a driver has to be chosen by hand.
+
+**Added 2026-09-04.** Core previously asked for a driverless queue whatever the transport. Deriving
+one is CUPS interrogating the printer over IPP, which a JetDirect box cannot answer, so the call
+created a queue CUPS then failed to configure and returned an error saying only that the printing
+system was not answering. That is exactly the printer this project exists for: found by SNMP, no
+device id, nothing else to go on. A connector adding one must pass a `ppd`, chosen from
+`printers.driverCandidates`.
+
 **`name` is free text and stays free text.** CUPS queue names may not contain a space, a slash, or a
 hash, so "Office laser" is not a legal queue name. Core keeps what the user typed as the printer's
 display name and derives a sanitised queue name from it internally. Connectors never see or need the

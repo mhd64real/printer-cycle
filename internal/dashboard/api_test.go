@@ -2,6 +2,8 @@ package dashboard_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,6 +24,11 @@ type fakeCore struct {
 	calls []call
 	reply map[string]any
 	err   map[string]error
+
+	// documents records what was streamed, keyed by stream id, so a test can
+	// assert the bytes that reached core rather than only that a call happened.
+	documents map[uint32][]byte
+	sendErr   error
 }
 
 type call struct {
@@ -30,10 +37,30 @@ type call struct {
 }
 
 func newFakeCore() *fakeCore {
-	return &fakeCore{reply: map[string]any{}, err: map[string]error{}}
+	return &fakeCore{
+		reply:     map[string]any{},
+		err:       map[string]error{},
+		documents: map[uint32][]byte{},
+	}
 }
 
 func (f *fakeCore) Connected() bool { return true }
+
+func (f *fakeCore) SendDocument(ctx context.Context, streamID uint32, r io.Reader) (int64, string, error) {
+	if f.sendErr != nil {
+		return 0, "", f.sendErr
+	}
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return 0, "", err
+	}
+	f.mu.Lock()
+	f.documents[streamID] = body
+	f.mu.Unlock()
+
+	sum := sha256.Sum256(body)
+	return int64(len(body)), "hex:" + hex.EncodeToString(sum[:]), nil
+}
 
 func (f *fakeCore) Call(ctx context.Context, method string, params, result any) error {
 	f.mu.Lock()
@@ -215,12 +242,12 @@ func TestThePageCannotSupplyItsOwnSession(t *testing.T) {
 	jar := signInAndKeepCookie(t, srv, core)
 
 	body, _ := json.Marshal(map[string]any{
-		"method": "jobs.submit",
-		"params": map[string]any{"session": "somebody-elses-session", "printer_id": "prn_1"},
+		"method": "identity.approve",
+		"params": map[string]any{"session": "somebody-elses-session", "request_id": "req_1"},
 	})
 	post(t, srv, jar, "/api/call", string(body))
 
-	submitted, ok := core.lastCall("jobs.submit")
+	submitted, ok := core.lastCall("identity.approve")
 	if !ok {
 		t.Fatal("the call never reached core")
 	}

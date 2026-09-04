@@ -123,6 +123,48 @@ export const api = {
     }),
 
   removePrinter: (id: string) => call<{ removed: string }>("printers.remove", { id }),
+
+  /**
+   * Sends a document to a printer.
+   *
+   * Not through /api/call. A document travels as bytes, and the relay carries
+   * JSON, so this posts a form the server streams straight through to core
+   * rather than holding the file anywhere along the way.
+   *
+   * The file goes last on purpose: the server reads the parts in order and has
+   * to know which printer it is for before the document starts arriving.
+   */
+  print: async (printerId: string, file: File, options: PrintOptions = {}) => {
+    const form = new FormData();
+    form.append("printer_id", printerId);
+    if (options.copies !== undefined) form.append("copies", String(options.copies));
+    if (options.duplex !== undefined) form.append("duplex", String(options.duplex));
+    if (options.color !== undefined) form.append("color", String(options.color));
+    if (options.media) form.append("media", options.media);
+    form.append("file", file, file.name);
+
+    const response = await fetch("/api/print", {
+      method: "POST",
+      body: form,
+      credentials: "same-origin",
+    });
+
+    const text = await response.text();
+    const payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    if (!response.ok) {
+      const message = typeof payload.error === "string" ? payload.error : "that document could not be printed";
+      throw new ApiError(message, response.status);
+    }
+    return payload as { result: { job_id: string; state: string } };
+  },
+};
+
+export type PrintOptions = {
+  copies?: number;
+  /** Unset means whatever the printer already does, which is not the same as off. */
+  duplex?: boolean;
+  color?: boolean;
+  media?: string;
 };
 
 /**

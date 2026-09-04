@@ -1,8 +1,20 @@
+import { useState } from "react";
+
 import { Button } from "@/components/Button";
+import { Print } from "@/screens/Print";
 import { Printers } from "@/screens/Printers";
 import { api, type User } from "@/api";
 
+const TABS = [
+  { key: "print", label: "Print" },
+  { key: "printers", label: "Printers" },
+] as const;
+
+type Tab = (typeof TABS)[number]["key"];
+
 export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => void }) {
+  const [tab, setTab] = useState<Tab>("print");
+
   async function signOut() {
     await api.signOut().catch(() => undefined);
     onSignOut();
@@ -23,8 +35,26 @@ export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => voi
         </div>
       </header>
 
+      <nav className="mt-4 flex gap-1 border-b border-line">
+        {TABS.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            onClick={() => setTab(entry.key)}
+            aria-current={tab === entry.key ? "page" : undefined}
+            className={
+              tab === entry.key
+                ? "-mb-px border-b-2 border-accent px-3 py-2 text-sm font-medium text-ink"
+                : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted hover:text-ink"
+            }
+          >
+            {entry.label}
+          </button>
+        ))}
+      </nav>
+
       <main className="mt-8">
-        <Printers />
+        {tab === "print" ? <Print /> : <Printers />}
       </main>
     </div>
   );

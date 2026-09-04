@@ -8,6 +8,9 @@
  * downloading one: this is a development aid, not a dependency of the product.
  *
  *   node scripts/shot.mjs <url> <out.png> [username] [password]
+ *
+ * SHOT_STEPS is a JSON list of interactions to perform before the shot, and
+ * SHOT_WAIT how long to settle afterwards.
  */
 import puppeteer from "puppeteer-core";
 
@@ -36,37 +39,57 @@ try {
     await page.waitForSelector('input[autocomplete="username"]', { timeout: 10_000 });
     await page.type('input[autocomplete="username"]', username);
     await page.type('input[type="password"]', password);
+    // Waits for the signed-in chrome to appear rather than for the sign-in form
+    // to disappear. Absence was the wrong signal: the first screen behind the
+    // form has a submit button of its own, so "no submit button" was never true
+    // and every run timed out.
     await Promise.all([
       page.click('button[type="submit"]'),
-      page.waitForFunction(() => !document.querySelector('button[type="submit"]'), {
-        timeout: 15_000,
-      }),
+      page.waitForFunction(
+        () => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Sign out"),
+        { timeout: 15_000 },
+      ),
     ]);
   }
 
-  // Optionally press something first, so a screenshot can capture a state that
-  // only exists after an interaction.
-  if (process.env.SHOT_CLICK) {
-    await clickByText(page, process.env.SHOT_CLICK);
+  // Interactions, as a list, because a screenshot is often of a state that only
+  // exists after a few of them:
+  //
+  //   SHOT_STEPS='[{"click":"Add a printer"},{"wait":8000},{"type":["input#x","hello"]}]'
+  //
+  // Steps run in order. A step that cannot find what it names fails loudly
+  // rather than screenshotting the wrong thing quietly, which is the whole
+  // reason for looking at all.
+  for (const step of JSON.parse(process.env.SHOT_STEPS ?? "[]")) {
+    if (step.wait !== undefined) {
+      await new Promise((r) => setTimeout(r, step.wait));
+    }
+    if (step.click !== undefined) {
+      await clickByText(page, step.click);
+    }
+    if (step.type !== undefined) {
+      const [selector, value] = step.type;
+      await page.waitForSelector(selector, { timeout: 10_000 });
+      await page.type(selector, value);
+    }
+    if (step.select !== undefined) {
+      const [selector, value] = step.select;
+      await page.waitForSelector(selector, { timeout: 10_000 });
+      await page.select(selector, value);
+    }
+    if (step.upload !== undefined) {
+      const [selector, file] = step.upload;
+      await page.waitForSelector(selector, { timeout: 10_000 });
+      const input = await page.$(selector);
+      await input.uploadFile(file);
+    }
+    if (step.press !== undefined) {
+      await page.waitForSelector(step.press, { timeout: 10_000 });
+      await page.click(step.press);
+    }
   }
 
   await new Promise((r) => setTimeout(r, Number(process.env.SHOT_WAIT ?? 1000)));
-
-  if (process.env.SHOT_THEN_CLICK) {
-    await clickByText(page, process.env.SHOT_THEN_CLICK);
-    await new Promise((r) => setTimeout(r, Number(process.env.SHOT_THEN_WAIT ?? 2000)));
-  }
-
-  // Fill a field and press something, for states that only exist after typing.
-  if (process.env.SHOT_TYPE) {
-    const [selector, value] = process.env.SHOT_TYPE.split("::");
-    await page.waitForSelector(selector, { timeout: 10_000 });
-    await page.type(selector, value);
-    if (process.env.SHOT_SUBMIT) {
-      await clickByText(page, process.env.SHOT_SUBMIT);
-      await new Promise((r) => setTimeout(r, Number(process.env.SHOT_SUBMIT_WAIT ?? 4000)));
-    }
-  }
 
   await page.screenshot({ path: out, fullPage: true });
   console.log("wrote", out);

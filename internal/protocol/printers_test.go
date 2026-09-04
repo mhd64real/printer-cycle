@@ -280,3 +280,44 @@ func TestAFailedAddLeavesNoQueueInCUPS(t *testing.T) {
 		t.Errorf("queue %q was left behind in CUPS by a failed add", queue)
 	}
 }
+
+// A printer that says nothing about itself, reached over a transport that
+// cannot be interrogated, has to be refused with a reason.
+//
+// "everywhere" is CUPS asking the printer what it can do over IPP. A socket or
+// LPD device cannot answer, so it used to produce a queue CUPS then failed to
+// configure and an error saying only that the printing system was not
+// answering. That is exactly the old printer this project is for: found by
+// SNMP, no device id, nothing else to go on.
+func TestAPrinterThatCannotBeInterrogatedNeedsADriverNamed(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	c := authedClient(t, url, db, "dashboard", store.KnownScopes())
+
+	for _, uri := range []string{
+		"socket://192.0.2.10:9100",
+		"lpd://192.0.2.10/queue",
+	} {
+		resp := c.call("printers.add", map[string]any{
+			"device_uri": uri,
+			"name":       uniqueName(t),
+		})
+		if resp.Error == nil {
+			t.Errorf("%s was accepted with no driver named", uri)
+			continue
+		}
+		if !strings.Contains(resp.Error.Message, "driver") {
+			t.Errorf("%s was refused with %q, which does not say a driver is needed",
+				uri, resp.Error.Message)
+		}
+	}
+
+	// Naming one explicitly is still the way through.
+	resp := c.call("printers.add", map[string]any{
+		"device_uri": "socket://192.0.2.10:9100",
+		"name":       uniqueName(t),
+		"ppd":        "drv:///sample.drv/generic.ppd",
+	})
+	if resp.Error != nil {
+		t.Errorf("naming a driver by hand was refused: %s", resp.Error.Message)
+	}
+}

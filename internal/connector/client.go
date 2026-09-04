@@ -9,10 +9,14 @@ package connector
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -62,8 +66,24 @@ type Client struct {
 
 	mu   sync.RWMutex
 	rpc  *jsonrpc.Conn
+	ws   *websocket.Conn
 	live bool
 }
+
+// streamIDSize is the big-endian stream identifier every binary frame starts
+// with, per PROTOCOL.md section 2. Declared here rather than shared with core
+// on purpose: a connector is an independent program that implements the written
+// protocol, and the moment it imports core's copy of a constant the document
+// stops being the thing both sides agree on.
+const streamIDSize = 4
+
+// chunkSize is how much of a document goes in one binary frame.
+//
+// The protocol recommends 64KB and caps a frame at 4MB. Staying at the
+// recommendation rather than near the cap is deliberate: the point of streaming
+// is that neither end holds the document, and a connector allocating 4MB per
+// chunk on a Pi Zero 2 W has given most of that back.
+const chunkSize = 64 << 10
 
 // New loads or creates this connector's key.
 func New(opts Options) (*Client, error) {
@@ -152,8 +172,8 @@ func (c *Client) session(ctx context.Context) error {
 		return err
 	}
 
-	c.setLive(rpc, true)
-	defer c.setLive(nil, false)
+	c.setLive(rpc, ws, true)
+	defer c.setLive(nil, nil, false)
 
 	return <-serveErr
 }
@@ -229,10 +249,64 @@ func (c *Client) Connected() bool {
 	return c.live
 }
 
-func (c *Client) setLive(rpc *jsonrpc.Conn, live bool) {
+func (c *Client) setLive(rpc *jsonrpc.Conn, ws *websocket.Conn, live bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.rpc, c.live = rpc, live
+	c.rpc, c.ws, c.live = rpc, ws, live
+}
+
+// SendDocument streams a document to an open job stream.
+//
+// Returns what was sent so the caller can pass it to jobs.commit, which is what
+// lets core tell a complete document from a connection that died halfway
+// through one. The digest is computed while the bytes go past rather than by
+// reading the document twice, because the caller may not have it twice: an
+// upload arriving over HTTP is readable exactly once.
+//
+// The document is never held here. It moves from the reader into a frame and
+// out, 64KB at a time.
+func (c *Client) SendDocument(ctx context.Context, streamID uint32, r io.Reader) (int64, string, error) {
+	c.mu.RLock()
+	ws, live := c.ws, c.live
+	c.mu.RUnlock()
+
+	if !live || ws == nil {
+		return 0, "", errors.New("connector: not connected to core")
+	}
+
+	digest := sha256.New()
+	frame := make([]byte, streamIDSize+chunkSize)
+	binary.BigEndian.PutUint32(frame[:streamIDSize], streamID)
+
+	var sent int64
+	for {
+		n, err := r.Read(frame[streamIDSize:])
+		if n > 0 {
+			chunk := frame[:streamIDSize+n]
+			if writeErr := c.writeChunk(ctx, ws, chunk); writeErr != nil {
+				return sent, "", writeErr
+			}
+			digest.Write(chunk[streamIDSize:])
+			sent += int64(n)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return sent, "", fmt.Errorf("connector: reading the document: %w", err)
+		}
+	}
+
+	return sent, "hex:" + hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+func (c *Client) writeChunk(ctx context.Context, ws *websocket.Conn, chunk []byte) error {
+	writeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := ws.Write(writeCtx, websocket.MessageBinary, chunk); err != nil {
+		return fmt.Errorf("connector: sending a document chunk: %w", err)
+	}
+	return nil
 }
 
 // readHello waits for core's greeting and returns the nonce to sign.

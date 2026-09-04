@@ -29,6 +29,10 @@ import (
 type Caller interface {
 	Call(ctx context.Context, method string, params, result any) error
 	Connected() bool
+
+	// SendDocument streams a document into an open job stream and reports what
+	// it sent, so the caller can prove to core that the whole document arrived.
+	SendDocument(ctx context.Context, streamID uint32, r io.Reader) (int64, string, error)
 }
 
 // Server is the dashboard's HTTP side.
@@ -58,6 +62,7 @@ func (d *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/logout", d.logout)
 	mux.HandleFunc("/api/me", d.me)
 	mux.HandleFunc("/api/call", d.call)
+	mux.HandleFunc("/api/print", d.print)
 	mux.HandleFunc("/api/events", d.events)
 
 	if !web.Built() {

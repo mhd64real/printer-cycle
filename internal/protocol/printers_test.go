@@ -242,3 +242,41 @@ func TestRemovingSomethingThatIsNotThere(t *testing.T) {
 		t.Errorf("removing a printer that does not exist gave %v", resp.Error)
 	}
 }
+
+// A failed add must leave nothing behind in CUPS either.
+//
+// CUPS-Add-Modify-Printer can fail after creating the queue: it makes the queue,
+// then tries to reach the printer to work out its capabilities, and reports an
+// error while leaving the queue in place. Without cleaning that up, every failed
+// attempt leaves a queue printer-cycle does not know about, invisible in the
+// interface and impossible to remove through it, while CUPS carries on
+// advertising it.
+func TestAFailedAddLeavesNoQueueInCUPS(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	c := authedClient(t, url, db, "dashboard", store.KnownScopes())
+
+	name := uniqueName(t)
+
+	// An address nothing answers on, so CUPS creates the queue and then fails
+	// working out what the printer can do.
+	resp := c.call("printers.add", map[string]any{
+		"device_uri": "ipp://127.0.0.1:9/ipp/print",
+		"name":       name,
+	})
+	if resp.Error == nil {
+		t.Fatal("adding a printer at an address nothing answers on succeeded")
+	}
+
+	printers, err := db.Printers(ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(printers) != 0 {
+		t.Errorf("a failed add left %d records behind", len(printers))
+	}
+
+	queue := strings.ReplaceAll(name, " ", "_")
+	if cupsHasQueue(t, queue) {
+		t.Errorf("queue %q was left behind in CUPS by a failed add", queue)
+	}
+}

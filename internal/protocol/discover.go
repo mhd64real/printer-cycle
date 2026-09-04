@@ -29,6 +29,18 @@ type discoverParams struct {
 // needs a driver, and guessing from the URI scheme would be a fabrication
 // dressed as a fact. printers.driverCandidates answers it from real data.
 type deviceView struct {
+	// Identity is what makes two announcements the same printer.
+	//
+	// It exists because discovery announces an update, not only an arrival: a
+	// printer first seen over ipps is announced again under dnssd once the
+	// better description of it turns up. Without this, the only thing a
+	// connector could key on is the device uri, which is the very field that
+	// changed, so the update read as a second printer and the page showed one
+	// machine twice until the final reply collapsed it.
+	//
+	// Opaque. Its form is not part of the contract, only its stability within
+	// a discovery run.
+	Identity     string `json:"identity"`
 	DeviceURI    string `json:"device_uri"`
 	DeviceID     string `json:"device_id"`
 	MakeAndModel string `json:"make_and_model"`
@@ -107,6 +119,7 @@ func (c *conn) printersDiscover(ctx context.Context, params json.RawMessage) (an
 		// ways. Passing all of them on would offer somebody three things to
 		// pair with, identically named, with nothing to choose between them.
 		key := identityOf(d)
+		view.Identity = key
 		if existing, ok := seen[key]; ok {
 			if better(view, devices[existing]) {
 				devices[existing] = view

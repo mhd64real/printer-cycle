@@ -57,6 +57,17 @@ try {
     await new Promise((r) => setTimeout(r, Number(process.env.SHOT_THEN_WAIT ?? 2000)));
   }
 
+  // Fill a field and press something, for states that only exist after typing.
+  if (process.env.SHOT_TYPE) {
+    const [selector, value] = process.env.SHOT_TYPE.split("::");
+    await page.waitForSelector(selector, { timeout: 10_000 });
+    await page.type(selector, value);
+    if (process.env.SHOT_SUBMIT) {
+      await clickByText(page, process.env.SHOT_SUBMIT);
+      await new Promise((r) => setTimeout(r, Number(process.env.SHOT_SUBMIT_WAIT ?? 4000)));
+    }
+  }
+
   await page.screenshot({ path: out, fullPage: true });
   console.log("wrote", out);
 } finally {

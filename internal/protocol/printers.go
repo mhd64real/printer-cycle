@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
@@ -216,6 +217,26 @@ func (c *conn) printersAdd(ctx context.Context, params json.RawMessage) (any, er
 			c.log.Error("cannot undo a printer record after CUPS refused it",
 				"printer", record.ID, "error", rollback)
 		}
+
+		// And undo it in CUPS, which is not as redundant as it looks.
+		//
+		// CUPS-Add-Modify-Printer can fail *after* creating the queue: it makes
+		// the queue, then tries to reach the printer to work out its
+		// capabilities, and reports an error while leaving the queue in place.
+		// Without this, every failed attempt leaves a queue printer-cycle does
+		// not know about, invisible in the interface and impossible to remove
+		// through it, while still being advertised by CUPS.
+		//
+		// Best effort: if the queue was never created this is a no-op, and if
+		// this fails too there is nothing further to try.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if orphan := c.server.cups.DeletePrinter(cleanup, record.QueueName); orphan != nil &&
+			!errors.Is(orphan, ipp.ErrNotFound) {
+			c.log.Warn("a queue may have been left behind by a failed add",
+				"queue", record.QueueName, "error", orphan)
+		}
+
 		return nil, c.translateIPP(err, subjectPrinter)
 	}
 

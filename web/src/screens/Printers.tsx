@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/Button";
+import { Field } from "@/components/Field";
 import { Notice } from "@/components/Notice";
 import { api, subscribe, type Device, type Printer } from "@/api";
 
@@ -103,9 +104,14 @@ function AddPrinter({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
     const stop = subscribe({
       "printer.discovered": (data) => {
         const device = data as Device;
-        setDevices((current) =>
-          current.some((d) => d.device_uri === device.device_uri) ? current : [...current, device],
-        );
+        setDevices((current) => {
+          // Replace in place rather than append, and hold the position: a
+          // printer that jumped down the list the moment a better description
+          // of it arrived would move under a cursor already on its way to it.
+          const at = current.findIndex((d) => sameDevice(d, device));
+          if (at === -1) return [...current, device];
+          return current.map((d, i) => (i === at ? device : d));
+        });
       },
     });
 
@@ -151,15 +157,128 @@ function AddPrinter({ onDone, onCancel }: { onDone: () => void; onCancel: () => 
           ))}
         </ul>
       )}
+
+      <ByAddress onAdded={onDone} searching={searching} />
     </div>
   );
 }
 
-function DeviceRow({ device, onAdded }: { device: Device; onAdded: () => void }) {
+/**
+ * Adding a printer by typing where it is.
+ *
+ * Searching finds printers that announce themselves. Plenty do not: one on
+ * another subnet, one with mDNS switched off, a network that filters broadcast
+ * traffic, or simply an older printer that was never going to say anything. All
+ * somebody should need to know is the address.
+ */
+function ByAddress({ onAdded, searching }: { onAdded: () => void; searching: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [address, setAddress] = useState("");
+  const [found, setFound] = useState<(Device & { port?: number }) | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // A full device URI is the expert path: somebody who knows exactly what they
+  // want should not be made to go through a lookup that guesses at it.
+  const looksLikeURI = address.includes("://");
+
+  async function look(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setFound(null);
+    setBusy(true);
+
+    try {
+      if (looksLikeURI) {
+        await api.addPrinter({ deviceUri: address.trim(), name: address.trim() });
+        onAdded();
+        return;
+      }
+      setFound(await api.probe(address.trim()));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "nothing answered at that address");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <p className="mt-4 border-t border-line pt-4 text-sm text-muted">
+        {searching ? "Still looking. " : ""}
+        Not listed?{" "}
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-accent underline underline-offset-2"
+        >
+          Add it by address
+        </button>
+        .
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-4 border-t border-line pt-4">
+      <form onSubmit={look} className="space-y-3">
+        <Field
+          label="Printer address"
+          hint="An address like 192.168.1.50, or printer.local. A full device URI works too."
+          placeholder="192.168.1.50"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          autoFocus
+          disabled={busy}
+        />
+        <div className="flex gap-2">
+          <Button type="submit" disabled={busy || address.trim() === ""}>
+            {busy ? (looksLikeURI ? "Adding" : "Looking") : looksLikeURI ? "Add" : "Look for it"}
+          </Button>
+          <Button type="button" variant="plain" onClick={() => setOpen(false)} disabled={busy}>
+            Back
+          </Button>
+        </div>
+      </form>
+
+      {error ? (
+        <div className="mt-3">
+          <Notice>{error}</Notice>
+        </div>
+      ) : null}
+
+      {found ? (
+        <div className="mt-3">
+          <p className="text-sm text-muted">Answered at that address</p>
+          <ul className="divide-y divide-line">
+            {/*
+              Deliberately labelled by address rather than by how it is
+              attached. The list above already says "On this network" for every
+              row, so repeating it here made a probe result look like a second
+              copy of a printer that was already listed. What the user wants
+              confirmed is which machine answered where they pointed.
+            */}
+            <DeviceRow device={found} onAdded={onAdded} subtitle={found.device_uri} />
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DeviceRow({
+  device,
+  onAdded,
+  subtitle,
+}: {
+  device: Device;
+  onAdded: () => void;
+  subtitle?: string;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const name = device.make_and_model || device.info || device.device_uri;
+  const name = displayName(device);
 
   async function pair() {
     setBusy(true);
@@ -183,7 +302,7 @@ function DeviceRow({ device, onAdded }: { device: Device; onAdded: () => void })
         <div className="min-w-0">
           <p className="truncate font-medium">{name}</p>
           <p className="truncate text-sm text-muted">
-            {describeTransport(device.transport)}
+            {subtitle ?? describeTransport(device.transport)}
             {device.make_and_model ? "" : ", model unknown"}
           </p>
         </div>
@@ -205,6 +324,34 @@ function DeviceRow({ device, onAdded }: { device: Device; onAdded: () => void })
       ) : null}
     </li>
   );
+}
+
+/** Whether two announcements describe one printer. */
+function sameDevice(a: Device, b: Device): boolean {
+  if (a.identity && b.identity) return a.identity === b.identity;
+  return a.device_uri === b.device_uri;
+}
+
+/**
+ * The name to show for a printer, without the manufacturer said twice.
+ *
+ * CUPS builds make-and-model by putting the manufacturer in front of the model,
+ * and most printers already put it in the model themselves, so the raw string
+ * comes back as "HP HP LaserJet 4000" or "Brother Brother HL-2270DW". Vendor
+ * software tends to just print that. Showing it that way here would undercut
+ * the whole point of this project, and the string also becomes the default
+ * queue name, so the stutter would follow the printer around.
+ *
+ * Only a leading repeat is collapsed. A model that genuinely repeats a word
+ * later on keeps it.
+ */
+export function displayName(device: Device): string {
+  const raw = (device.make_and_model || device.info || device.device_uri).trim();
+  const [first, second, ...rest] = raw.split(/\s+/);
+  if (first && second && first.toLowerCase() === second.toLowerCase()) {
+    return [second, ...rest].join(" ");
+  }
+  return raw;
 }
 
 /** Says how a printer is attached, in words rather than a URI scheme. */

@@ -18,8 +18,9 @@ func TestDiscoveryArrivesProgressively(t *testing.T) {
 	c := authedClient(t, url, db, "dashboard", []string{store.ScopePrintersRead})
 
 	type arrival struct {
-		uri string
-		at  time.Duration
+		identity string
+		uri      string
+		at       time.Duration
 	}
 
 	start := time.Now()
@@ -64,6 +65,7 @@ func TestDiscoveryArrivesProgressively(t *testing.T) {
 
 		if probe.Method == "printer.discovered" {
 			var d struct {
+				Identity  string `json:"identity"`
 				DeviceURI string `json:"device_uri"`
 				Transport string `json:"transport"`
 			}
@@ -73,7 +75,11 @@ func TestDiscoveryArrivesProgressively(t *testing.T) {
 			if d.DeviceURI == "" {
 				t.Error("a discovery notification carried no device uri")
 			}
-			notified = append(notified, arrival{d.DeviceURI, time.Since(start)})
+			if d.Identity == "" {
+				t.Error("a discovery notification carried no identity, so a page " +
+					"has nothing to key on but the uri, which is what changes")
+			}
+			notified = append(notified, arrival{d.Identity, d.DeviceURI, time.Since(start)})
 			continue
 		}
 
@@ -96,9 +102,33 @@ func TestDiscoveryArrivesProgressively(t *testing.T) {
 	if len(notified) == 0 {
 		t.Fatal("no printer.discovered notifications arrived. Is the virtual printer container up?")
 	}
-	if len(reply.Result.Devices) != len(notified) {
-		t.Errorf("the reply lists %d devices but %d were announced; the two must agree",
-			len(reply.Result.Devices), len(notified))
+
+	// Compared by identity rather than by count, because one printer is
+	// legitimately announced more than once: a better description of it
+	// replaces the first. What must hold is that the announcements and the
+	// reply describe the same set of printers, so a page that applied every
+	// announcement ends up with exactly what the reply says.
+	announced := make(map[string]bool, len(notified))
+	for _, a := range notified {
+		announced[a.identity] = true
+	}
+	listed := make(map[string]bool, len(reply.Result.Devices))
+	for _, d := range reply.Result.Devices {
+		identity, _ := d["identity"].(string)
+		if identity == "" {
+			t.Errorf("a listed device carried no identity: %v", d)
+		}
+		listed[identity] = true
+	}
+	if len(announced) != len(listed) {
+		t.Errorf("the reply lists %d printers but %d distinct ones were announced; "+
+			"the two must agree", len(listed), len(announced))
+	}
+	for identity := range announced {
+		if !listed[identity] {
+			t.Errorf("printer %q was announced but is missing from the reply, so a page "+
+				"would show it and then lose it", identity)
+		}
 	}
 
 	// No assertion about the spread between announcements, deliberately.

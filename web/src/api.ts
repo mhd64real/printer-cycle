@@ -25,6 +25,17 @@ export type Printer = {
 };
 
 export type Device = {
+  /**
+   * Stable across a discovery run, and the right thing to key a list on.
+   *
+   * Discovery announces updates as well as arrivals: a printer first seen over
+   * ipps is announced again under dnssd once a better description of it turns
+   * up. Keying on device_uri instead means the update reads as a second
+   * printer, and the same machine shows twice until the final reply lands.
+   *
+   * Absent on probe results, which have nothing to reconcile against.
+   */
+  identity?: string;
   device_uri: string;
   device_id: string;
   make_and_model: string;

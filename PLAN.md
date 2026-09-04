@@ -1371,7 +1371,46 @@ person who wrote it.
 ### Stage 47: Manual add on the same page
 - Type an IP, or paste a full URI for experts.
 - **Done when:** an address alone produces a working queue.
-- **Status:** todo
+- **Status:** done, 2026-09-04. `127.0.0.1:8632` typed alone identified the printer, and the queue it
+  produced accepted a real PDF that the virtual printer logged receiving.
+- A typed address is looked up first and offered as something to confirm, rather than turned straight
+  into a queue. A string containing `://` skips that: somebody who knows exactly what they want
+  should not be made to go through a lookup that guesses at it.
+
+**A failed add left a queue behind in CUPS.** `CUPS-Add-Modify-Printer` can fail *after* creating the
+queue: it makes the queue, then tries to reach the printer to work out its capabilities, and reports
+an error with the queue still in place. printer-cycle rolled back its own record and left that one,
+so every failed attempt added a queue it did not know about, invisible in the interface and
+impossible to remove through it, while CUPS carried on advertising it. Both sides are now undone
+together. Found by adding an unreachable address and then asking CUPS what it had, rather than
+trusting that the error meant nothing happened.
+
+**A printer can refuse a hostname that resolves to it.** `ipp://printer:8632` failed while
+`ipp://192.168.97.3:8632` succeeded, from the same machine, with `getent` returning that exact
+address for that exact name. It is the `Host` header, not resolution: the printer rejects a name it
+does not recognise as its own. So a name that works everywhere else on the network can still fail
+here, and the resulting error says only that the printer is not answering. The lookup step happens to
+protect against this, because it sends the same `Host` the queue later will, and an address that
+answers the lookup will answer the queue.
+
+**One printer showed twice while the search ran.** Discovery announces an *update* as well as an
+arrival, replacing a device first seen over `ipps` when the better `dnssd` description of it turns
+up. The only thing the page could key on was the device URI, which is exactly what changes between
+the two, so it appended instead of replacing and the same machine sat in the list twice until the
+final reply collapsed it. Devices now carry an opaque `identity`, added to PROTOCOL.md § 7b. The test
+that should have caught it was counting announcements; it now compares the announced set against the
+reply, which is the property that actually matters.
+
+**"Example Example Printer".** CUPS builds make-and-model by putting the manufacturer in front of the
+model, and most printers already put it in the model themselves, so the string comes back stuttered:
+"HP HP LaserJet 4000", "Brother Brother HL-2270DW". Vendor software tends to just print that. It also
+becomes the default queue name, so it would have followed the printer around. A leading repeat is now
+collapsed; a model that repeats a word later keeps it.
+
+**Dev-environment limit, not a product one.** `127.0.0.1` means the container to CUPS and the host to
+the dashboard, and both dev ports are bound to loopback on purpose, so no single address reaches both
+halves of the stack. In production core and cupsd share a host and the seam does not exist. The two
+halves were verified against the address each can actually reach.
 
 ### Stage 48: Print page
 - Choose printer, upload a file, set copies, duplex, colour, and media, submit.
@@ -1775,3 +1814,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   `libnss-mdns` as an installer requirement against Stage 58. Corrected a comment that confidently
   blamed a pairing failure on TLS when the cause was name resolution; the fix it justified was kept,
   the reasoning was not.
+- **2026-09-04, after Stage 47:** added `identity` to discovered devices (PROTOCOL.md § 7b), because
+  discovery announces updates and the page had nothing to key on but the field that changes. A failed
+  add now undoes the CUPS side as well as its own record: the printing system can fail *after*
+  creating a queue, and rolling back only half of that leaves orphans nothing can reach. Two of the
+  three bugs this stage came from looking at the screen and at CUPS after an error, not from a test.

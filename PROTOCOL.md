@@ -359,6 +359,7 @@ five to ten seconds. Clients render devices as they arrive; they never block on 
 
 ```json
 {"jsonrpc":"2.0","method":"printer.discovered","params":{
+  "identity":"service:HP%20LaserJet%201018",
   "device_uri":"usb://HP/LaserJet%201018?serial=KP123",
   "device_id":"MFG:Hewlett-Packard;MDL:HP LaserJet 1018;CMD:ZJS;",
   "make_and_model":"HP LaserJet 1018",
@@ -373,6 +374,20 @@ speaks IPP Everywhere and needs no driver. CUPS does not report it: `CUPS-Get-De
 backend and exposes no such attribute, so the field could only ever have been guessed at from the URI
 scheme. Whether a device needs a driver is answered by `printers.driverCandidates`, where a device
 that needs none comes back with `everywhere` as its recommendation. One place, from real data.
+
+`identity` is what makes two announcements the same printer, and it is what a client keys its list
+on. Opaque: its form is not part of this contract, only its stability for the length of a discovery
+run.
+
+**Added 2026-09-04, after watching one printer appear twice.** A printer announces itself under
+several service types, and core announces an *update* as well as an arrival: a device first seen over
+`ipps` is announced again under `dnssd` once the better description of it turns up. Before this field
+existed the only thing a client could key on was `device_uri`, which is exactly what changes between
+the two, so the update read as a second printer and the page showed one machine twice until the final
+reply collapsed it. A client that applies every announcement in order, keyed on `identity`, ends up
+with exactly what the reply says.
+
+Announcements are therefore not one-per-printer, and a client must not count them. Apply them.
 
 `transport` is the device URI's scheme: `usb`, `dnssd`, `ipp`, `ipps`, `socket`, `lpd`, `serial`.
 

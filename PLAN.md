@@ -1464,7 +1464,40 @@ raising the timeout.
 - Show the candidate list when automatic selection cannot decide, marking the recommended one and
   saying plainly which need a proprietary plugin.
 - **Done when:** a socket printer with no device id can be added from the dashboard.
-- **Status:** todo
+- **Status:** done, 2026-09-04. `socket://192.0.2.10:9100` typed into the address box, refused for
+  want of a driver, given one from the catalogue, and the queue came out called "HP LaserJet 4100
+  MFP" with the right PPD.
+- Added `printers.drivers` (PROTOCOL.md section 7b): manufacturers with nothing named, drivers with
+  either a make or a search. Capped at 200 by default, and it says when it cut the list.
+- The refusal is recognised by **error code**, not by message text, so improving the wording cannot
+  quietly turn the next step back into a dead end. Added `-32008 driver required`, and the dashboard
+  now passes core's code through to the page rather than only its message.
+
+**Measured, because the design depends on the numbers.** A full driver installation is 17,974 PPDs.
+Asking for `ppd-make` alone makes cupsd collapse that to 80 manufacturers, which is a list somebody
+can choose from. One manufacturer alone can be 2,904 drivers, which is not.
+
+**CUPS honours `ppd-make` or `ppd-make-and-model`, never both.** Sending both returns everything by
+that manufacturer with the model filter silently ignored: make=HP plus model="LaserJet 4" gives 2,904
+rather than 147. The failure mode is a list that looks perfectly plausible and is the wrong one, so
+core sends whichever filter is more selective and applies the other itself, and a test asserts every
+result still matches the model.
+
+**The expert path now confirms before it creates.** Pasting a device URI used to make a queue
+outright. It produces a row to confirm instead, so both ways of adding a printer share one driver
+step rather than keeping two copies of it. Seeing what is about to be added is not a cost.
+
+**A queue was called `socket://192.0.2.10:9100`.** A printer that cannot say what it is has no name
+to fall back on but its address. Choosing a driver is the moment its model becomes known, so that is
+what it gets called: names now come from the driver, cleaned of the catalogue's own vocabulary.
+"HP LaserJet 4100 MFP v.3010.107 Postscript (recommended)" becomes "HP LaserJet 4100 MFP", "Epson
+Stylus C20 - CUPS+Gutenprint v5.3.4" becomes "Epson Stylus C20". A heuristic, written against real
+catalogue entries rather than imagined ones.
+
+**The screenshot driver pressed the wrong button twice.** Once a tab that shared a label with the
+action, once the first of two "Add" buttons when the second was meant. Both produced a screenshot of
+a plausible wrong thing rather than an error, which is the worst way for a check to fail. It now
+takes an index.
 
 ### Stage 49: Jobs page with live status
 - Driven by pushes, never by polling. Cancel button.
@@ -1873,3 +1906,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   half-use them. Added Stage 48b: core now refuses to guess a driver for a transport it cannot
   interrogate, which is correct and leaves the oldest printers with nowhere to go until the
   dashboard can offer the candidate list.
+- **2026-09-04, after Stage 48b:** added `printers.drivers` and error code -32008, and the dashboard
+  now passes core's error codes to the page so a refusal can be acted on rather than only shown.
+  Recorded that CUPS ignores the model filter when a make is also given, which is a silent wrong
+  answer rather than an error, and is now covered by a test.

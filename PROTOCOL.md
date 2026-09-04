@@ -106,6 +106,7 @@ Error codes: JSON-RPC reserved range for protocol faults, and application faults
 | -32005 | unknown stream |
 | -32006 | identity not linked |
 | -32007 | payload rejected (size, checksum, unsupported type) |
+| -32008 | driver required (the printer cannot be identified, so one must be named) |
 
 ---
 
@@ -441,6 +442,28 @@ Two signals arrive inside `ppd-make-and-model` and both are ranking inputs:
   {"ppd":"drv:///sample.drv/generpcl.ppd","score":20,"recommended":false}
 ]}}
 ```
+
+**printers.drivers** browses the driver catalogue, for a printer nothing can identify.
+
+```json
+{"jsonrpc":"2.0","id":12,"method":"printers.drivers","params":{"make":"HP","query":"LaserJet 4","limit":200}}
+```
+
+With no `make` and no `query` it answers `{"makes":["Brother","Canon","HP", ...]}`. With either it
+answers `{"drivers":[...],"truncated":false}`, in the same shape as `printers.driverCandidates`.
+Requires `printers.read`.
+
+**Never ask for the whole catalogue.** Measured on a full driver installation: 17,974 PPDs, of which
+one manufacturer alone was 2,904. Core caps a reply at 200 by default and 1,000 at most, and says
+`truncated` when it cut the list, because a list silently cut reads as the complete answer and
+somebody whose printer is past the cut concludes it is unsupported.
+
+`query` matches anywhere in the make-and-model, case insensitively.
+
+**CUPS honours `ppd-make` or `ppd-make-and-model`, never both.** Sending both returns everything by
+that manufacturer with the model filter silently ignored: make=HP with model="LaserJet 4" gives 2,904
+results rather than 147. Core sends whichever is more selective and applies the other itself. A
+connector talking to CUPS directly needs to know this; one talking to core does not.
 
 **printers.add** is the pair button.
 

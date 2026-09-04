@@ -64,6 +64,113 @@ func (c *conn) printersDriverCandidates(ctx context.Context, params json.RawMess
 	return map[string]any{"candidates": candidates}, nil
 }
 
+// driversParams asks for part of the driver catalogue.
+type driversParams struct {
+	// Make narrows to one manufacturer. Empty with no query asks for the list
+	// of manufacturers instead of drivers, because the catalogue is far too
+	// large to hand over whole.
+	Make string `json:"make"`
+
+	// Query is matched against make-and-model, case insensitively, anywhere in
+	// the string.
+	Query string `json:"query"`
+
+	Limit int `json:"limit"`
+}
+
+// driverLimit bounds a driver search.
+//
+// Measured, not guessed: a full driver installation is close to eighteen
+// thousand PPDs, and one manufacturer alone can be three thousand of them.
+// Sending that to a page would be a multi-megabyte response built and decoded
+// on a machine with 512MB of RAM, to render a list nobody can read.
+const (
+	driverLimitDefault = 200
+	driverLimitMax     = 1000
+)
+
+// printersDrivers browses the driver catalogue, for a printer whose model could
+// not be worked out automatically.
+//
+// Two shapes, because picking from eighteen thousand needs narrowing before it
+// needs listing: with no make and no query it answers with manufacturers, and
+// with either it answers with drivers.
+func (c *conn) printersDrivers(ctx context.Context, params json.RawMessage) (any, error) {
+	if c.server.cups == nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInternalError, "no connection to the printing system")
+	}
+
+	var p driversParams
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
+		}
+	}
+
+	// Named manufacturer rather than make, because make is a builtin and
+	// shadowing it here breaks the slice allocation further down.
+	manufacturer := strings.TrimSpace(p.Make)
+	query := strings.TrimSpace(p.Query)
+
+	if manufacturer == "" && query == "" {
+		makes, err := c.server.cups.PPDMakes(ctx)
+		if err != nil {
+			return nil, c.translateIPP(err, subjectPrinter)
+		}
+		return map[string]any{"makes": makes}, nil
+	}
+
+	limit := p.Limit
+	if limit <= 0 {
+		limit = driverLimitDefault
+	}
+	limit = min(limit, driverLimitMax)
+
+	// Which filter goes to CUPS matters, and not for the reason it looks.
+	//
+	// CUPS honours ppd-make or ppd-make-and-model, not both: sending both
+	// returns everything by that manufacturer, with the model filter silently
+	// ignored. Asking for make=HP and model="LaserJet 4" gives all 2904 HP
+	// drivers rather than the 147 that match.
+	//
+	// So the more selective one is sent and the other applied here. A query is
+	// almost always the narrower of the two, which also keeps the response
+	// small, which is the point.
+	filter := ipp.PPDFilter{Make: manufacturer}
+	if query != "" {
+		filter = ipp.PPDFilter{MakeAndModel: query}
+	}
+
+	ppds, err := c.server.cups.PPDs(ctx, filter)
+	if err != nil {
+		return nil, c.translateIPP(err, subjectPrinter)
+	}
+
+	out := make([]candidateView, 0, min(len(ppds), limit))
+	truncated := false
+	for _, ppd := range ppds {
+		if query != "" && manufacturer != "" && !strings.EqualFold(ppd.Make, manufacturer) {
+			continue
+		}
+		if len(out) == limit {
+			truncated = true
+			break
+		}
+		lower := strings.ToLower(ppd.MakeAndModel)
+		out = append(out, candidateView{
+			PPD:                       ppd.Name,
+			MakeAndModel:              ppd.MakeAndModel,
+			Recommended:               strings.Contains(lower, "(recommended)"),
+			RequiresProprietaryPlugin: strings.Contains(lower, "proprietary plugin"),
+		})
+	}
+
+	// Said out loud rather than left to look like the whole answer. A list
+	// silently cut at 200 reads as "these are all of them", and somebody whose
+	// printer is number 201 concludes it is not supported.
+	return map[string]any{"drivers": out, "truncated": truncated}, nil
+}
+
 func (c *conn) driverCandidates(ctx context.Context, deviceID string) ([]candidateView, error) {
 	ppds, err := c.server.cups.PPDs(ctx, ipp.PPDFilter{DeviceID: deviceID})
 	if err != nil {
@@ -166,7 +273,7 @@ func (c *conn) printersAdd(ctx context.Context, params json.RawMessage) (any, er
 		}
 		chosen, clean := chooseDriver(candidates)
 		if chosen == "" {
-			return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams,
+			return nil, jsonrpc.Errorf(jsonrpc.CodeDriverRequired,
 				"no driver claims this printer, so one has to be chosen by hand")
 		}
 		ppd = chosen
@@ -185,7 +292,7 @@ func (c *conn) printersAdd(ctx context.Context, params json.RawMessage) (any, er
 		// system was not answering. That is precisely the old printer this
 		// project exists for: found by SNMP, no device id, nothing else to go
 		// on. Saying what is actually needed beats failing obscurely.
-		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams,
+		return nil, jsonrpc.Errorf(jsonrpc.CodeDriverRequired,
 			"this printer did not say what model it is, so a driver has to be chosen by hand")
 	}
 

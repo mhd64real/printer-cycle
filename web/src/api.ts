@@ -51,11 +51,22 @@ export type DriverCandidate = {
   requires_proprietary_plugin: boolean;
 };
 
+/**
+ * Codes core uses for refusals a page can act on.
+ *
+ * Only the ones the interface does something about. The rest are reported as
+ * whatever core said, which is the right thing to do with a refusal nobody has
+ * written a response to yet.
+ */
+export const DRIVER_REQUIRED = -32008;
+
 /** Thrown for anything the server refused, carrying what it said. */
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Core's error code, when the refusal came from core. */
+    readonly code?: number,
   ) {
     super(message);
   }
@@ -76,7 +87,11 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 
   if (!response.ok) {
     const message = typeof payload.error === "string" ? payload.error : "something went wrong";
-    throw new ApiError(message, response.status);
+    throw new ApiError(
+      message,
+      response.status,
+      typeof payload.code === "number" ? payload.code : undefined,
+    );
   }
   return payload as T;
 }
@@ -113,6 +128,18 @@ export const api = {
 
   driverCandidates: (deviceId: string) =>
     call<{ candidates: DriverCandidate[] }>("printers.driverCandidates", { device_id: deviceId }),
+
+  /** The manufacturers there are drivers for. Around eighty on a full install. */
+  driverMakes: () => call<{ makes: string[] }>("printers.drivers", {}),
+
+  /**
+   * Drivers, narrowed.
+   *
+   * Never ask for everything: a full driver installation is close to eighteen
+   * thousand, and one manufacturer alone can be three thousand of them.
+   */
+  drivers: (params: { make?: string; query?: string; limit?: number }) =>
+    call<{ drivers: DriverCandidate[]; truncated: boolean }>("printers.drivers", params),
 
   addPrinter: (device: { deviceUri: string; name: string; deviceId?: string; ppd?: string }) =>
     call<Printer & { driver_chosen_automatically: boolean }>("printers.add", {
@@ -152,8 +179,13 @@ export const api = {
     const text = await response.text();
     const payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
     if (!response.ok) {
-      const message = typeof payload.error === "string" ? payload.error : "that document could not be printed";
-      throw new ApiError(message, response.status);
+      const message =
+        typeof payload.error === "string" ? payload.error : "that document could not be printed";
+      throw new ApiError(
+        message,
+        response.status,
+        typeof payload.code === "number" ? payload.code : undefined,
+      );
     }
     return payload as { result: { job_id: string; state: string } };
   },

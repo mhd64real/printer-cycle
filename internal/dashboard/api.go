@@ -3,10 +3,13 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 )
 
 // sessionCookie carries the core session the browser signed in with.
@@ -32,6 +35,7 @@ var browserMethods = map[string]bool{
 	"printers.list":             true,
 	"printers.discover":         true,
 	"printers.probe":            true,
+	"printers.drivers":          true,
 	"printers.driverCandidates": true,
 	"printers.add":              true,
 	"printers.remove":           true,
@@ -226,7 +230,7 @@ func (d *Server) call(w http.ResponseWriter, r *http.Request) {
 	var result json.RawMessage
 	if err := d.client.Call(ctx, req.Method, params, &result); err != nil {
 		d.log.Debug("core refused a relayed call", "method", req.Method, "error", err)
-		writeJSONError(w, http.StatusBadRequest, humanise(err))
+		writeCoreError(w, err)
 		return
 	}
 
@@ -254,6 +258,22 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeJSONError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{"error": message})
+}
+
+// writeCoreError passes core's refusal on, code and all.
+//
+// The code travels because some refusals are things the page can act on rather
+// than only report. "A driver has to be chosen by hand" is one: the page can
+// offer the catalogue instead of leaving somebody at a dead end. Matching on
+// the message text would work until the day the wording improved.
+func writeCoreError(w http.ResponseWriter, err error) {
+	body := map[string]any{"error": humanise(err)}
+
+	var rpcErr *jsonrpc.Error
+	if errors.As(err, &rpcErr) {
+		body["code"] = rpcErr.Code
+	}
+	writeJSON(w, http.StatusBadRequest, body)
 }
 
 type setupRequest struct {

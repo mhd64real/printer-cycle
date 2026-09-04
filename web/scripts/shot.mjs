@@ -65,7 +65,7 @@ try {
       await new Promise((r) => setTimeout(r, step.wait));
     }
     if (step.click !== undefined) {
-      await clickByText(page, step.click);
+      await clickByText(page, step.click, step.nth ?? 0);
     }
     if (step.type !== undefined) {
       const [selector, value] = step.type;
@@ -97,17 +97,28 @@ try {
   await browser.close();
 }
 
-/** Presses the first button whose visible text matches, the way a person would. */
-async function clickByText(page, text) {
-  const found = await page.evaluate((wanted) => {
-    const button = [...document.querySelectorAll("button")].find(
-      (b) => b.textContent?.trim() === wanted,
+/**
+ * Presses a button by its visible text, the way a person would.
+ *
+ * Takes an index because a label is not unique: a page can show several "Add"
+ * buttons at once, one per thing that can be added, and a driver that always
+ * took the first one pressed the wrong row and screenshotted the wrong result.
+ */
+async function clickByText(page, text, nth = 0) {
+  const count = await page.evaluate(
+    (wanted, index) => {
+      const buttons = [...document.querySelectorAll("button")].filter(
+        (b) => b.textContent?.trim() === wanted,
+      );
+      buttons[index]?.click();
+      return buttons.length;
+    },
+    text,
+    nth,
+  );
+  if (count <= nth) {
+    throw new Error(
+      `wanted button ${nth} labelled ${JSON.stringify(text)}, page has ${count}`,
     );
-    if (!button) return false;
-    button.click();
-    return true;
-  }, text);
-  if (!found) {
-    throw new Error(`no button labelled ${JSON.stringify(text)}`);
   }
 }

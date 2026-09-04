@@ -37,6 +37,7 @@ const (
 	CodeUnknownStream     = -32005
 	CodeIdentityNotLinked = -32006
 	CodePayloadRejected   = -32007
+	CodeDriverRequired    = -32008
 )
 
 // Transport carries whole messages.

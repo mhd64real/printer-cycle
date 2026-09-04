@@ -121,3 +121,46 @@ func (c *Client) PPDs(ctx context.Context, filter PPDFilter) ([]PPD, error) {
 	}
 	return ppds, nil
 }
+
+// PPDMakes lists the manufacturers CUPS has drivers for.
+//
+// A separate call rather than a field on PPDs because CUPS answers it
+// differently: asking for ppd-make and nothing else makes cupsd collapse the
+// catalogue to one entry per manufacturer. Measured against a real cupsd, that
+// turns close to eighteen thousand drivers into eighty names, which is the
+// difference between a list somebody can choose from and a response that should
+// never be built on a Raspberry Pi.
+func (c *Client) PPDMakes(ctx context.Context) ([]string, error) {
+	req := c.NewRequest(goipp.OpCupsGetPpds)
+	req.Operation.Add(goipp.MakeAttribute("printer-uri", goipp.TagURI, goipp.String(c.RootURI())))
+	req.Operation.Add(requestedAttributes("ppd-make"))
+
+	resp, err := c.Do(ctx, "/", req, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := check(goipp.OpCupsGetPpds, resp); err != nil {
+		if errorsIsNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// Deduplicated here as well as by cupsd. The collapsing is cupsd's
+	// behaviour rather than anything the specification promises, so a cupsd
+	// that did not do it would otherwise produce eighteen thousand names.
+	seen := make(map[string]bool)
+	var makes []string
+	for _, g := range resp.Groups {
+		if g.Tag != goipp.TagPrinterGroup {
+			continue
+		}
+		name := str(g.Attrs, "ppd-make")
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		makes = append(makes, name)
+	}
+	return makes, nil
+}

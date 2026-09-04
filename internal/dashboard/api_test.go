@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/mhd64real/printer-cycle/internal/dashboard"
+	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 )
 
 // fakeCore stands in for core, recording what the dashboard asked it and
@@ -322,5 +323,39 @@ func TestErrorsReachThePageWithoutProtocolNoise(t *testing.T) {
 	}
 	if payload.Error != "no driver claims this printer" {
 		t.Errorf("error = %q, want the sentence without the protocol wrapper", payload.Error)
+	}
+}
+
+// Core's error code has to reach the page, because some refusals are things a
+// page can act on rather than only report. "A driver has to be chosen by hand"
+// is one: the page can offer the catalogue instead of leaving somebody stuck.
+// Matching on the message text would work until the wording improved.
+func TestCoreErrorCodesReachThePage(t *testing.T) {
+	srv, core := testServer(t)
+	jar := signInAndKeepCookie(t, srv, core)
+
+	core.err["printers.add"] = &jsonrpc.Error{
+		Code:    jsonrpc.CodeDriverRequired,
+		Message: "this printer did not say what model it is, so a driver has to be chosen by hand",
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"method": "printers.add",
+		"params": map[string]any{"device_uri": "socket://192.0.2.10:9100", "name": "Old"},
+	})
+	resp := post(t, srv, jar, "/api/call", string(body))
+
+	var got struct {
+		Error string `json:"error"`
+		Code  int    `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Code != jsonrpc.CodeDriverRequired {
+		t.Errorf("the page was told code %d, want %d", got.Code, jsonrpc.CodeDriverRequired)
+	}
+	if !strings.Contains(got.Error, "driver") {
+		t.Errorf("the message reached the page as %q", got.Error)
 	}
 }

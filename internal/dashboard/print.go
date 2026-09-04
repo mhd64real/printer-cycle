@@ -136,7 +136,7 @@ func (d *Server) streamToPrinter(
 	}, &opened)
 	if err != nil {
 		d.log.Debug("core refused a print job", "printer", printerID, "error", err)
-		writeJSONError(w, http.StatusBadRequest, humanise(err))
+		writeCoreError(w, err)
 		return
 	}
 
@@ -163,7 +163,7 @@ func (d *Server) streamToPrinter(
 		"sha256":    digest,
 	}, &done); err != nil {
 		d.log.Debug("core refused to finish a print job", "job", opened.JobID, "error", err)
-		writeJSONError(w, http.StatusBadRequest, humanise(err))
+		writeCoreError(w, err)
 		return
 	}
 

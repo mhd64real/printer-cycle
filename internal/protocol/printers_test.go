@@ -321,3 +321,126 @@ func TestAPrinterThatCannotBeInterrogatedNeedsADriverNamed(t *testing.T) {
 		t.Errorf("naming a driver by hand was refused: %s", resp.Error.Message)
 	}
 }
+
+// Browsing the catalogue is how a printer that cannot be identified gets a
+// driver at all, so it has to be usable: the manufacturer list short enough to
+// choose from, and a search narrow enough to read.
+func TestBrowsingTheDriverCatalogue(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	c := authedClient(t, url, db, "dashboard", []string{store.ScopePrintersRead})
+
+	// With nothing named, the answer is manufacturers rather than drivers.
+	var makes struct {
+		Makes []string `json:"makes"`
+	}
+	resp := c.call("printers.drivers", map[string]any{})
+	if resp.Error != nil {
+		t.Fatalf("asking for manufacturers failed: %s", resp.Error.Message)
+	}
+	if err := json.Unmarshal(resp.Result, &makes); err != nil {
+		t.Fatal(err)
+	}
+	if len(makes.Makes) < 5 {
+		t.Fatalf("only %d manufacturers came back, which is not a catalogue", len(makes.Makes))
+	}
+	t.Logf("%d manufacturers", len(makes.Makes))
+
+	for _, name := range makes.Makes {
+		if name == "" {
+			t.Error("a manufacturer came back with no name")
+		}
+	}
+
+	// A search narrows by model, across manufacturers.
+	var found struct {
+		Drivers   []map[string]any `json:"drivers"`
+		Truncated bool             `json:"truncated"`
+	}
+	resp = c.call("printers.drivers", map[string]any{"query": "LaserJet 4", "limit": 20})
+	if resp.Error != nil {
+		t.Fatalf("searching failed: %s", resp.Error.Message)
+	}
+	if err := json.Unmarshal(resp.Result, &found); err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Drivers) == 0 {
+		t.Fatal("searching for a LaserJet found no drivers")
+	}
+	for _, d := range found.Drivers {
+		model, _ := d["make_and_model"].(string)
+		if !strings.Contains(strings.ToLower(model), "laserjet 4") {
+			t.Errorf("search for \"LaserJet 4\" returned %q", model)
+		}
+		if ppd, _ := d["ppd"].(string); ppd == "" {
+			t.Errorf("a driver came back with no ppd to select it by: %v", d)
+		}
+	}
+}
+
+// A list cut short must say so. Silently truncating reads as "these are all of
+// them", and somebody whose printer is past the cut concludes it is unsupported.
+func TestATruncatedDriverListSaysSo(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	c := authedClient(t, url, db, "dashboard", []string{store.ScopePrintersRead})
+
+	var found struct {
+		Drivers   []map[string]any `json:"drivers"`
+		Truncated bool             `json:"truncated"`
+	}
+	resp := c.call("printers.drivers", map[string]any{"query": "laser", "limit": 3})
+	if resp.Error != nil {
+		t.Fatalf("searching failed: %s", resp.Error.Message)
+	}
+	if err := json.Unmarshal(resp.Result, &found); err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Drivers) != 3 {
+		t.Fatalf("limit 3 returned %d drivers", len(found.Drivers))
+	}
+	if !found.Truncated {
+		t.Error("a list cut at the limit did not say it was cut")
+	}
+}
+
+// CUPS honours ppd-make or ppd-make-and-model, never both: sending both returns
+// everything by that manufacturer with the model filter silently ignored. Core
+// works around it, and this is the assertion that the workaround is still doing
+// something, because the failure mode is a list that looks plausible and is
+// simply the wrong one.
+func TestAManufacturerAndAModelNarrowTogether(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	c := authedClient(t, url, db, "dashboard", []string{store.ScopePrintersRead})
+
+	var found struct {
+		Drivers []map[string]any `json:"drivers"`
+	}
+	resp := c.call("printers.drivers", map[string]any{
+		"make": "HP", "query": "LaserJet 4", "limit": 500,
+	})
+	if resp.Error != nil {
+		t.Fatalf("searching failed: %s", resp.Error.Message)
+	}
+	if err := json.Unmarshal(resp.Result, &found); err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Drivers) == 0 {
+		t.Fatal("no HP LaserJet 4 drivers found")
+	}
+	for _, d := range found.Drivers {
+		model, _ := d["make_and_model"].(string)
+		if !strings.Contains(strings.ToLower(model), "laserjet 4") {
+			t.Errorf("a manufacturer plus a model returned %q, so the model was ignored", model)
+		}
+	}
+	t.Logf("%d HP drivers match LaserJet 4", len(found.Drivers))
+}
+
+func TestBrowsingDriversNeedsThePrintersReadScope(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	c := authedClient(t, url, db, "dashboard", []string{})
+
+	resp := c.call("printers.drivers", map[string]any{})
+	if resp.Error == nil {
+		t.Fatal("browsing drivers was allowed with no scopes")
+	}
+}

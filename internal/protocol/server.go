@@ -376,6 +376,8 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.printersProbe(ctx, params)
 	case "printers.list":
 		return c.printersList(ctx)
+	case "printers.drivers":
+		return c.printersDrivers(ctx, params)
 	case "printers.driverCandidates":
 		return c.printersDriverCandidates(ctx, params)
 	case "printers.add":

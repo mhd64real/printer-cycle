@@ -3,7 +3,16 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
 import { Notice } from "@/components/Notice";
-import { api, subscribe, type Device, type Printer } from "@/api";
+import { DriverPicker } from "@/components/DriverPicker";
+import {
+  ApiError,
+  DRIVER_REQUIRED,
+  api,
+  subscribe,
+  type Device,
+  type DriverCandidate,
+  type Printer,
+} from "@/api";
 
 /**
  * The printers page.
@@ -177,8 +186,14 @@ function ByAddress({ onAdded, searching }: { onAdded: () => void; searching: boo
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // A full device URI is the expert path: somebody who knows exactly what they
-  // want should not be made to go through a lookup that guesses at it.
+  // A full device URI is the expert path: it skips the lookup, because somebody
+  // who knows exactly what they want should not be made to sit through a guess
+  // at it. It still produces a row to confirm rather than a queue outright.
+  //
+  // That confirmation was added when adding by hand grew a driver step. A
+  // printer that cannot say what model it is has to be given a driver, and the
+  // choosing happens on the row. Two paths to the same row beats two copies of
+  // the same fallback, and seeing what is about to be added is not a cost.
   const looksLikeURI = address.includes("://");
 
   async function look(event: FormEvent) {
@@ -189,8 +204,15 @@ function ByAddress({ onAdded, searching }: { onAdded: () => void; searching: boo
 
     try {
       if (looksLikeURI) {
-        await api.addPrinter({ deviceUri: address.trim(), name: address.trim() });
-        onAdded();
+        const uri = address.trim();
+        setFound({
+          device_uri: uri,
+          device_id: "",
+          make_and_model: "",
+          info: "",
+          location: "",
+          transport: uri.split("://")[0] ?? "",
+        });
         return;
       }
       setFound(await api.probe(address.trim()));
@@ -232,7 +254,7 @@ function ByAddress({ onAdded, searching }: { onAdded: () => void; searching: boo
         />
         <div className="flex gap-2">
           <Button type="submit" disabled={busy || address.trim() === ""}>
-            {busy ? (looksLikeURI ? "Adding" : "Looking") : looksLikeURI ? "Add" : "Look for it"}
+            {busy ? "Looking" : looksLikeURI ? "Use it" : "Look for it"}
           </Button>
           <Button type="button" variant="plain" onClick={() => setOpen(false)} disabled={busy}>
             Back
@@ -276,20 +298,38 @@ function DeviceRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [choosingDriver, setChoosingDriver] = useState(false);
 
   const name = displayName(device);
 
-  async function pair() {
+  async function pair(driver?: DriverCandidate) {
     setBusy(true);
     setError(null);
     try {
       await api.addPrinter({
         deviceUri: device.device_uri,
-        name,
+        // A printer that could not say what it is has no name worth using: the
+        // fallback is its device uri, so a queue ends up called
+        // "socket://192.0.2.10:9100". Choosing a driver is the moment its model
+        // becomes known, so that is what it gets called.
+        name: device.make_and_model
+          ? name
+          : driver
+            ? printerNameFor(driver.make_and_model)
+            : name,
         deviceId: device.device_id,
+        ...(driver ? { ppd: driver.ppd } : {}),
       });
       onAdded();
     } catch (err) {
+      // Core refusing for want of a driver is not a dead end, it is the next
+      // step. Recognised by code rather than by message, so improving the
+      // wording cannot quietly turn it back into a dead end.
+      if (err instanceof ApiError && err.code === DRIVER_REQUIRED) {
+        setChoosingDriver(true);
+        setBusy(false);
+        return;
+      }
       setError(err instanceof Error ? err.message : "could not add this printer");
       setBusy(false);
     }
@@ -305,7 +345,7 @@ function DeviceRow({
             {device.make_and_model ? "" : ", model unknown"}
           </p>
         </div>
-        <Button onClick={pair} disabled={busy}>
+        <Button onClick={() => pair()} disabled={busy || choosingDriver}>
           {busy ? "Adding" : "Add"}
         </Button>
       </div>
@@ -316,6 +356,14 @@ function DeviceRow({
         </p>
       ) : null}
 
+      {choosingDriver ? (
+        <DriverPicker
+          busy={busy}
+          onChoose={(driver) => pair(driver)}
+          onCancel={() => setChoosingDriver(false)}
+        />
+      ) : null}
+
       {error ? (
         <div className="mt-2">
           <Notice>{error}</Notice>
@@ -323,6 +371,63 @@ function DeviceRow({
       ) : null}
     </li>
   );
+}
+
+/**
+ * Words that name a page description language rather than a printer.
+ *
+ * Only stripped from the end of a name, where they are the driver talking. A
+ * printer genuinely called "PostScript something" keeps it.
+ */
+const DRIVER_WORDS = new Set([
+  "pcl",
+  "pcl3",
+  "pcl5",
+  "pcl5c",
+  "pcl5e",
+  "pcl6",
+  "ps",
+  "postscript",
+  "pxlmono",
+  "pxlcolor",
+  "hpijs",
+  "hpcups",
+  "cups",
+  "pdf",
+  "raster",
+]);
+
+/**
+ * The name to give a printer whose driver was chosen by hand.
+ *
+ * A driver is named for the machine it drives plus a great deal about itself:
+ * "HP LaserJet 4100 MFP v.3010.107 Postscript (recommended)", "Epson Stylus C20
+ * - CUPS+Gutenprint v5.3.4", "Brother DCP-1200 Foomatic/hl1250". The printer is
+ * in there, in front, and the rest is the catalogue talking.
+ *
+ * A heuristic, checked against the real catalogue rather than invented: every
+ * shape handled here came out of a live CUPS installation. It only ever runs on
+ * a printer that could not say what it is, so the alternative it is competing
+ * with is a queue named after a device uri.
+ */
+export function printerNameFor(makeAndModel: string): string {
+  let name = makeAndModel.replace(/\([^)]*\)/g, " ");
+
+  // Everything from the first of these onwards is about the driver.
+  for (const cut of [" - ", ", ", " Foomatic/"]) {
+    const at = name.indexOf(cut);
+    if (at > 0) name = name.slice(0, at);
+  }
+
+  // A version, and whatever trails it.
+  const version = name.search(/\sv\.?\d/i);
+  if (version > 0) name = name.slice(0, version);
+
+  const words = name.trim().replace(/\s+/g, " ").split(" ");
+  while (words.length > 1 && DRIVER_WORDS.has(words[words.length - 1]!.toLowerCase())) {
+    words.pop();
+  }
+  return words.join(" ") || makeAndModel;
 }
 
 /** Whether two announcements describe one printer. */

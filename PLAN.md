@@ -1643,7 +1643,36 @@ what made "enrolling does not enable anything" true in the first place.
 ### Stage 53: Parse IEEE 1284 device IDs
 - Extract MFG, MDL, CMD, and friends into a struct.
 - **Done when:** real device ID strings parse correctly, including malformed ones.
-- **Status:** todo
+- **Status:** done, 2026-09-05. Written against the 14,825 device ids carried by the PPDs on a full
+  driver installation rather than against the specification, because what printers emit and what the
+  specification says are not the same document. 13,109 unique ones are committed as a fixture and
+  the whole set is swept by a test.
+
+**Every tolerance is answering something real, with a count.** The long key spellings are not a
+guess: MFG 14,761 against MANUFACTURER 62, MDL 13,335 against MODEL 1,120, CMD 6,136 against
+COMMAND SET 1,473, DES 2,564 against DESCRIPTION 58. `Model` in mixed case appears 367 times, which
+is what makes case-insensitive keys a correctness matter rather than a nicety. 1,645 ids put a space
+after the colon, 368 put one after a comma, 17 have no trailing semicolon, and some repeat a key
+outright.
+
+**Only commas separate a command set.** "CMD:Adobe PostScript 3, PCL, PJL" is three languages and the
+first has spaces inside it, so splitting on whitespace would turn one language into three.
+
+**Parsing never fails.** A device id comes from hardware, and hardware is where the strange strings
+are. Refusing one would mean refusing to pair a printer over punctuation, so anything unreadable is
+simply absent and the caller asks for what it needs. `CMD:PCL;` is a complete device id in this
+catalogue: it names no hardware, which is a fact about that printer rather than a parse error.
+
+**All but six of 13,109 name their hardware.** Two are command sets alone, three are an OKIDATA with
+no manufacturer, and one is **a typo in Debian's own driver packaging**: a Kodak 605 Photo Printer
+whose PPD writes `MCL:` where `MDL:` was meant, so it cannot match itself automatically. The parser
+does not correct it. Guessing what a broken key meant is how a parser starts inventing hardware, and
+the value is kept under its misspelled name for anything that wants to deal with it. Recorded here
+because Stage 54 may want a fallback, and this is the evidence for that decision rather than a
+reason to bury it.
+
+**Fields nothing is named for are kept.** `DRV` is how foomatic drivers are selected and `CID` is
+Brother's, and dropping the rest would mean parsing the string twice.
 
 ### Stage 54: Candidate ranking, and caching
 - The preference table as data, not code.
@@ -2041,3 +2070,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-09-05, after Stage 52:** added `users.remove`, named in the scope table since the spec was
   written and never implemented. User management appears only when there is somebody to manage, which
   means the one action that creates that state has to live outside it.
+- **2026-09-05, after Stage 53:** the device id parser was written from 14,825 real strings rather
+  than from the specification, and 13,109 of them are committed as a fixture so the sweep tests every
+  real shape rather than the ones an author thought of. Found a typo in Debian's own driver packaging
+  and left it uncorrected on purpose.

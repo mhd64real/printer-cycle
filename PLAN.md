@@ -1542,7 +1542,43 @@ machine. If that stops being true before Stage 58 ships, it has to be written.
 - List installed connectors, enable and disable, and render any settings schema without knowing
   anything about the connector.
 - **Done when:** a connector nobody anticipated gets a working settings page for free.
-- **Status:** todo
+- **Status:** done, 2026-09-05. Proven the only way it can be: by writing a connector in another
+  language, from PROTOCOL.md alone, importing nothing from this project, declaring settings about
+  weather stations and forecast footers. Its page rendered every field type and saved them, and not
+  one line of dashboard code mentions it.
+- Every field type renders: string with its description, enum as a list, secret as a write-only box
+  that says whether one is stored, int with its bounds, bool as a switch, text as a box.
+- Saved one field at a time rather than as a form, because a connector is told the moment a setting
+  changes. A form that saved everything at once would hand it a token before the setting saying what
+  to do with it, and an unsaved field would look identical to a saved one.
+- Three `settings.changed` notifications reached the running connector while it sat idle, and the
+  secret reached it in full while the dashboard saw only that one was stored. That is the rule
+  section 6 was corrected to state, working.
+
+**Nothing could add a connector at all.** Bootstrapping said new connectors are "enrolled the normal
+way, through the dashboard", and there was no such way: core could create a connector record and
+issue an enrolment token, and no protocol method reached either. The dashboard could list and
+configure connectors it already had, and a connector nobody anticipated could not arrive. Added
+`connectors.invite`, which creates and invites in one act because from an administrator's side both
+are "let this program connect", and a connector created without a token is a record nobody can use.
+
+**A connector that was switched off was told its signature was wrong.** Being disabled was
+indistinguishable from not existing: both verified against a dummy key, both came back
+"authentication failed". Safe, and miserable, because switched off is the ordinary state of every
+newly enrolled connector, so the first thing a connector author saw after getting their signing code
+exactly right was a message pointing at their crypto. The signature is now checked first and the
+answer given plainly. Nothing leaks: only the holder of the private key ever reaches it. The test
+that asserted all failures look identical was narrowed to the cases that share the property, with a
+wrong key against a disabled connector added to it, and the new behaviour given its own test.
+
+**A test was failing whenever the machine was busy.** It started a goroutine to write a setting, then
+returned as soon as the notification arrived, while that call was still waiting for its reply.
+Cleanup closed the socket underneath it and the goroutine reported a failure against a test that had
+already finished. It passed alone and failed in a full run, which is why it had been written off as a
+cascade twice before. It waits for the goroutine now.
+
+**The checkbox had no id**, found by trying to press one. The wrapping label meant it worked for
+anybody using it, so nothing was broken, but it was the one field type that could not be addressed.
 
 ### Stage 51: Identity link approval
 - The screen where a pairing code is approved, plus the list of linked identities with revoke.
@@ -1948,3 +1984,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   named since Stage 30 and nothing had ever provided. Corrected the job states, which the spec had
   documented and core had never emitted, in the three places the translation was missing. Dropped
   `rendering` rather than implement a state CUPS cannot distinguish.
+- **2026-09-05, after Stage 50:** added `connectors.invite` and `connectors.setEnabled`, without
+  which no connector could be added to a running system at all. Core now tells a correctly
+  authenticated but switched-off connector why it was refused. Fixed a test whose goroutine outlived
+  it, which had been dismissed as a cascade twice.

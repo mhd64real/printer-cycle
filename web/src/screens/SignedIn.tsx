@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/Button";
+import { Connectors } from "@/screens/Connectors";
 import { Jobs } from "@/screens/Jobs";
 import { Print } from "@/screens/Print";
 import { Printers } from "@/screens/Printers";
@@ -10,6 +11,7 @@ const TABS = [
   { key: "print", label: "Print" },
   { key: "jobs", label: "Jobs" },
   { key: "printers", label: "Printers" },
+  { key: "connectors", label: "Connectors" },
 ] as const;
 
 type Tab = (typeof TABS)[number]["key"];
@@ -56,7 +58,15 @@ export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => voi
       </nav>
 
       <main className="mt-8">
-        {tab === "print" ? <Print /> : tab === "jobs" ? <Jobs /> : <Printers />}
+        {tab === "print" ? (
+          <Print />
+        ) : tab === "jobs" ? (
+          <Jobs />
+        ) : tab === "printers" ? (
+          <Printers />
+        ) : (
+          <Connectors />
+        )}
       </main>
     </div>
   );

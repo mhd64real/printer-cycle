@@ -65,6 +65,42 @@ export type JobUpdate = {
   produced_no_output?: boolean;
 };
 
+/**
+ * One setting a connector declares.
+ *
+ * The dashboard has never heard of any particular connector and renders this
+ * without knowing what it is for, which is what lets somebody write a connector
+ * this project has never seen and get a settings page for free.
+ */
+export type SettingField = {
+  key: string;
+  type: "string" | "text" | "int" | "bool" | "enum" | "secret";
+  label: string;
+  description?: string;
+  required?: boolean;
+  default?: unknown;
+  options?: string[];
+  min?: number;
+  max?: number;
+};
+
+/** A secret is reported as set or unset, never as a value. */
+export type SecretValue = { secret: true; set: boolean };
+
+export type Connector = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  identity: string;
+  enabled: boolean;
+  enrolled: boolean;
+  connected: boolean;
+  scopes: string[];
+  settings_schema: SettingField[];
+  settings: Record<string, unknown>;
+};
+
 export type Device = {
   /**
    * Stable across a discovery run, and the right thing to key a list on.
@@ -191,6 +227,35 @@ export const api = {
     }),
 
   removePrinter: (id: string) => call<{ removed: string }>("printers.remove", { id }),
+
+  connectors: () =>
+    call<{ connectors: Connector[]; known_scopes: string[] }>("connectors.list", {}),
+
+  /**
+   * Lets a program that is not here yet connect.
+   *
+   * The token comes back once and cannot be shown again: only a hash of it is
+   * kept, so there is nothing to look up later.
+   */
+  inviteConnector: (connectorId: string, name: string, scopes: string[]) =>
+    call<{ connector_id: string; token: string; expires_in: number }>("connectors.invite", {
+      connector_id: connectorId,
+      name,
+      scopes,
+    }),
+
+  setConnectorEnabled: (id: string, enabled: boolean) =>
+    call<{ connector_id: string; enabled: boolean }>("connectors.setEnabled", {
+      connector_id: id,
+      enabled,
+    }),
+
+  setConnectorSetting: (id: string, key: string, value: unknown) =>
+    call<{ connector_id: string; key: string }>("connectors.setSetting", {
+      connector_id: id,
+      key,
+      value,
+    }),
 
   jobs: (limit = 50) => call<{ jobs: Job[] }>("jobs.list", { limit }),
 

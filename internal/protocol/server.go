@@ -406,6 +406,10 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.settingsGet(ctx)
 	case "connectors.list":
 		return c.connectorsList(ctx)
+	case "connectors.invite":
+		return c.connectorsInvite(ctx, params)
+	case "connectors.setEnabled":
+		return c.connectorsSetEnabled(ctx, params)
 	case "connectors.setSetting":
 		return c.connectorsSetSetting(ctx, params)
 	case "connectors.setFallbackUser":
@@ -505,8 +509,21 @@ func (c *conn) authenticate(ctx context.Context, params json.RawMessage) (any, e
 	key := dummyKey
 	var connector *store.Connector
 
+	// Enrolled is what decides which key to check against, not enabled.
+	//
+	// Being turned off used to be indistinguishable from not existing: both
+	// verified against the dummy key and both came back "authentication
+	// failed". Safe, and miserable. A connector author whose signing code was
+	// perfect was told their signature was wrong, with nothing anywhere saying
+	// an administrator had not switched them on yet, which is the ordinary
+	// state of every newly enrolled connector.
+	//
+	// Checking the signature first costs nothing and leaks nothing: only the
+	// holder of the private key ever reaches the answer below, and telling
+	// somebody who has already proved who they are that they are switched off
+	// tells them nothing they could not ask an administrator.
 	if found, err := c.db.Connector(ctx, p.ConnectorID); err == nil {
-		if found.Enrolled() && found.Enabled {
+		if found.Enrolled() {
 			key = found.PublicKey
 			connector = &found
 		}
@@ -522,6 +539,13 @@ func (c *conn) authenticate(ctx context.Context, params json.RawMessage) (any, e
 		c.log.Warn("authentication failed", "connector", p.ConnectorID)
 		return nil, authFailed()
 	}
+	if connector != nil && !connector.Enabled {
+		c.log.Warn("a connector proved who it is and is switched off",
+			"connector", connector.ID)
+		return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated,
+			"this connector is turned off. An administrator has to switch it on in the dashboard")
+	}
+
 	if connector == nil {
 		// The signature verified against the dummy key, which cannot happen,
 		// but failing closed costs nothing.

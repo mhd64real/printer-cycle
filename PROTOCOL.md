@@ -260,6 +260,46 @@ cannot inject code into the dashboard.
 The dashboard renders any schema it is given, so every connector past and future gets a settings page
 for free.
 
+**Verified 2026-09-05** by writing a connector in another language, from this document alone,
+importing nothing from the project, and declaring settings about weather stations. Its page rendered
+and saved every field type without a line of dashboard code mentioning it.
+
+### Adding a connector
+
+**connectors.invite** lets a program that is not here yet connect. Requires `connectors.manage`.
+
+```json
+{"jsonrpc":"2.0","id":20,"method":"connectors.invite","params":{
+  "connector_id":"weather-sign","name":"Weather Sign","scopes":["jobs.submit","printers.read"]
+}}
+```
+
+Returns `{"connector_id":"...","token":"PCE-...","expires_in":86400}`. The token is single use, and
+returned once: only a hash of it is stored, so there is nothing to look up later. Inviting a
+connector that already exists reissues its token without touching its scopes, which is how one whose
+key was lost with the machine it ran on gets back in.
+
+A newly invited connector is **switched off**. Enrolling proves which key belongs to which name; an
+administrator decides what runs.
+
+**connectors.setEnabled** turns one on or off. Requires `connectors.manage`.
+
+```json
+{"jsonrpc":"2.0","id":21,"method":"connectors.setEnabled","params":{"connector_id":"weather-sign","enabled":true}}
+```
+
+Checked fresh on every call, so switching a connector off takes effect on the call it is making right
+now rather than whenever it next reconnects. A connector cannot switch itself off: the effect would be
+immediate and the way back in would be editing the database by hand.
+
+**connectors.list** returns `known_scopes` alongside `connectors`, so an interface offering to invite
+one does not need its own copy of what a scope is called.
+
+**A connector that authenticates correctly while switched off is told so**, rather than being told its
+signature was wrong. Only the holder of the private key ever reaches that answer, so it reveals
+nothing, and being switched off is the ordinary state of every newly enrolled connector. Every other
+failure, including a wrong key for a disabled connector, stays indistinguishable.
+
 **Corrected 2026-08-31.** An earlier draft said secret values are "stored encrypted and never
 returned in plaintext to any client, including the dashboard". Both halves were wrong.
 

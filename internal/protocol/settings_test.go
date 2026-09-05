@@ -43,13 +43,23 @@ func TestASettingChangeReachesTheRunningConnector(t *testing.T) {
 	changed := make(chan map[string]any, 4)
 
 	// The dashboard writes while the connector is connected and idle.
+	//
+	// Waited for at the end rather than left running. The test used to return as
+	// soon as the notification arrived, while this call was still waiting for
+	// its reply, and cleanup would close the socket underneath it. The goroutine
+	// then reported a failure against a test that had already finished, which
+	// only happened when the machine was busy enough for the reply to lose the
+	// race: it passed alone and failed in a full run.
+	wrote := make(chan struct{})
 	go func() {
+		defer close(wrote)
 		dashboard.callCollecting("connectors.setSetting", map[string]any{
 			"connector_id": "telegram",
 			"key":          "max_pages",
 			"value":        42,
 		}, nil)
 	}()
+	defer func() { <-wrote }()
 
 	telegram.awaitNotification(func(method string, params json.RawMessage) bool {
 		if method != "settings.changed" {
@@ -236,5 +246,73 @@ func TestReadingOtherConnectorsSettingsNeedsAScope(t *testing.T) {
 		"connector_id": "telegram", "key": "max_pages", "value": 5,
 	}); resp.Error == nil || resp.Error.Code != jsonrpc.CodeScopeDenied {
 		t.Errorf("a connector changed settings without connectors.manage: %v", resp.Error)
+	}
+}
+
+// The round trip through the protocol method, including turning one back on.
+//
+// That a disabled connector is refused at all is covered in scopes_test.go by
+// TestDisablingAConnectorTakesEffectImmediately, which goes through the store.
+// This one is about the method somebody actually presses.
+func TestSwitchingAConnectorOffAndOnAgain(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	admin := authedClient(t, url, db, "dashboard", store.KnownScopes())
+	other := authedClient(t, url, db, "telegram", []string{store.ScopePrintersRead})
+
+	// Working to begin with, so the refusal afterwards means something.
+	if resp := other.call("printers.list", map[string]any{}); resp.Error != nil {
+		t.Fatalf("the connector could not list printers before being disabled: %v", resp.Error)
+	}
+
+	resp := admin.call("connectors.setEnabled", map[string]any{
+		"connector_id": "telegram", "enabled": false,
+	})
+	if resp.Error != nil {
+		t.Fatalf("disabling: %v", resp.Error)
+	}
+
+	// The same connection, still open, still authenticated.
+	if resp := other.call("printers.list", map[string]any{}); resp.Error == nil {
+		t.Error("a disabled connector was still served on its existing connection")
+	}
+
+	if resp := admin.call("connectors.setEnabled", map[string]any{
+		"connector_id": "telegram", "enabled": true,
+	}); resp.Error != nil {
+		t.Fatalf("re-enabling: %v", resp.Error)
+	}
+	if resp := other.call("printers.list", map[string]any{}); resp.Error != nil {
+		t.Errorf("a re-enabled connector was still refused: %v", resp.Error)
+	}
+}
+
+// Nobody would mean to switch off the connector they are holding, and everybody
+// would be able to. The way back in would be editing the database by hand.
+func TestAConnectorCannotSwitchItselfOff(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	c := authedClient(t, url, db, "dashboard", store.KnownScopes())
+
+	resp := c.call("connectors.setEnabled", map[string]any{
+		"connector_id": "dashboard", "enabled": false,
+	})
+	if resp.Error == nil {
+		t.Fatal("a connector switched itself off")
+	}
+
+	// And it is still working, which is the part that matters.
+	if resp := c.call("printers.list", map[string]any{}); resp.Error != nil {
+		t.Errorf("the connector stopped working anyway: %v", resp.Error)
+	}
+}
+
+func TestSwitchingAConnectorNeedsTheManageScope(t *testing.T) {
+	url, db := cupsBackedServer(t)
+	c := authedClient(t, url, db, "telegram", []string{store.ScopeConnectorsRead})
+
+	resp := c.call("connectors.setEnabled", map[string]any{
+		"connector_id": "dashboard", "enabled": false,
+	})
+	if resp.Error == nil {
+		t.Fatal("switching a connector was allowed with only the read scope")
 	}
 }

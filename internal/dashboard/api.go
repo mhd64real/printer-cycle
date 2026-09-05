@@ -51,6 +51,8 @@ var browserMethods = map[string]bool{
 	// /api/print, which runs the whole sequence or none of it.
 
 	"connectors.list":            true,
+	"connectors.setEnabled":      true,
+	"connectors.invite":          true,
 	"connectors.setSetting":      true,
 	"connectors.setFallbackUser": true,
 

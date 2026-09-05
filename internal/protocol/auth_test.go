@@ -253,8 +253,10 @@ func TestEveryAuthenticationFailureLooksIdentical(t *testing.T) {
 	if _, err := db.CreateConnector(context.Background(), "unenrolled", "", nil); err != nil {
 		t.Fatal(err)
 	}
-	// A connector enrolled but switched off.
-	disabledKey := enrolledConnector(t, db, "disabled", nil)
+	// A connector enrolled but switched off. Its own key is not needed here:
+	// what is being checked is that somebody who cannot sign for it learns
+	// nothing from it existing.
+	enrolledConnector(t, db, "disabled", nil)
 	if err := db.SetConnectorEnabled(context.Background(), "disabled", false); err != nil {
 		t.Fatal(err)
 	}
@@ -264,14 +266,21 @@ func TestEveryAuthenticationFailureLooksIdentical(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Every case here is somebody who has NOT proved possession of a valid key,
+	// and they must all look the same. A connector that is switched off is not
+	// in this list: it proves who it is first and is then told plainly, which
+	// is TestASwitchedOffConnectorIsToldSo below. Whoever cannot sign still
+	// cannot tell a disabled connector from one that never existed, because
+	// they never get as far as the answer.
 	cases := map[string]struct {
 		id  string
 		key ed25519.PrivateKey
 	}{
-		"unknown connector":  {"no-such-connector", good},
-		"never enrolled":     {"unenrolled", good},
-		"disabled connector": {"disabled", disabledKey},
-		"wrong key":          {"telegram", wrongKey},
+		"unknown connector":     {"no-such-connector", good},
+		"never enrolled":        {"unenrolled", good},
+		"wrong key":             {"telegram", wrongKey},
+		"disabled, wrong key":   {"disabled", wrongKey},
+		"disabled, other's key": {"disabled", good},
 	}
 
 	var messages []string
@@ -294,6 +303,39 @@ func TestEveryAuthenticationFailureLooksIdentical(t *testing.T) {
 		if m != messages[0] {
 			t.Errorf("failures are distinguishable: %q vs %q", m, messages[0])
 		}
+	}
+}
+
+// A connector that is switched off has to be told that, rather than that its
+// signature was wrong.
+//
+// It used to be told the latter. Being turned off is the ordinary state of
+// every newly enrolled connector, so the first thing a connector author saw
+// after getting their signing code exactly right was "authentication failed",
+// with nothing anywhere pointing at the switch. The check happens after the
+// signature verifies, so only somebody who has already proved who they are ever
+// sees this, and they learn nothing they could not ask an administrator.
+func TestASwitchedOffConnectorIsToldSo(t *testing.T) {
+	url, db := testServer(t)
+
+	key := enrolledConnector(t, db, "sleeping", nil)
+	if err := db.SetConnectorEnabled(context.Background(), "sleeping", false); err != nil {
+		t.Fatal(err)
+	}
+
+	c := dial(t, url)
+	resp := c.call("authenticate", map[string]any{
+		"connector_id": "sleeping",
+		"proof":        c.proof(key),
+	})
+	if resp.Error == nil {
+		t.Fatal("a switched off connector authenticated")
+	}
+	if resp.Error.Code != jsonrpc.CodeNotAuthenticated {
+		t.Errorf("code = %d, want not authenticated", resp.Error.Code)
+	}
+	if !strings.Contains(strings.ToLower(resp.Error.Message), "turned off") {
+		t.Errorf("message = %q, which does not say it is switched off", resp.Error.Message)
 	}
 }
 

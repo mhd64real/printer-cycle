@@ -1,12 +1,14 @@
 import { useState } from "react";
 
 import { Button } from "@/components/Button";
+import { Jobs } from "@/screens/Jobs";
 import { Print } from "@/screens/Print";
 import { Printers } from "@/screens/Printers";
 import { api, type User } from "@/api";
 
 const TABS = [
   { key: "print", label: "Print" },
+  { key: "jobs", label: "Jobs" },
   { key: "printers", label: "Printers" },
 ] as const;
 
@@ -54,7 +56,7 @@ export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => voi
       </nav>
 
       <main className="mt-8">
-        {tab === "print" ? <Print /> : <Printers />}
+        {tab === "print" ? <Print /> : tab === "jobs" ? <Jobs /> : <Printers />}
       </main>
     </div>
   );

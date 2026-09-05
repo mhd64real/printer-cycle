@@ -48,14 +48,14 @@ func TestAnAbandonedStreamIsCollected(t *testing.T) {
 			t.Fatal(err)
 		}
 		state = job.State
-		if state == "aborted" {
+		if state == "failed" {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if state != "aborted" {
-		t.Fatalf("job state = %q after going quiet, want aborted", state)
+	if state != "failed" {
+		t.Fatalf("job state = %q after going quiet, want failed", state)
 	}
 
 	// The stream is gone, so committing it now finds nothing.

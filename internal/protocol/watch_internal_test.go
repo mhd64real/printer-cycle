@@ -48,7 +48,7 @@ func TestAJobThatPrintedNothingIsNotReportedAsSuccess(t *testing.T) {
 }
 
 // A job that actually printed is left alone.
-func TestAJobThatPrintedIsReportedAsCompleted(t *testing.T) {
+func TestAJobThatPrintedIsReportedAsDone(t *testing.T) {
 	s := silentServer()
 
 	job := store.Job{ID: "job_1", SizeBytes: 4096}
@@ -59,8 +59,8 @@ func TestAJobThatPrintedIsReportedAsCompleted(t *testing.T) {
 	}
 
 	state, _, pages, suspect := s.finishJob(context.Background(), job, event)
-	if state != "completed" {
-		t.Errorf("state = %q, want completed", state)
+	if state != "done" {
+		t.Errorf("state = %q, want done", state)
 	}
 	if suspect {
 		t.Error("a job that printed three pages was flagged as producing nothing")
@@ -83,8 +83,8 @@ func TestAnEmptyDocumentIsNotFlagged(t *testing.T) {
 	if suspect {
 		t.Error("a zero-byte job producing no pages was flagged")
 	}
-	if state != "completed" {
-		t.Errorf("state = %q, want completed", state)
+	if state != "done" {
+		t.Errorf("state = %q, want done", state)
 	}
 }
 
@@ -97,7 +97,7 @@ func TestNonCompletedTerminalStatesPassThrough(t *testing.T) {
 		want  string
 	}{
 		{ipp.JobCanceled, "cancelled"},
-		{ipp.JobAborted, "aborted"},
+		{ipp.JobAborted, "failed"},
 	} {
 		job := store.Job{ID: "job_1", SizeBytes: 4096}
 		event := ipp.Event{JobID: 7, JobState: tc.state, PagesDone: 0}

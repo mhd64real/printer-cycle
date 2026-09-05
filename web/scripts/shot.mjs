@@ -83,6 +83,13 @@ try {
       const input = await page.$(selector);
       await input.uploadFile(file);
     }
+    // An extra frame mid-run, for proving something changed rather than only
+    // that it ended up right. A page driven by pushes looks identical to one
+    // that reloaded unless you catch it in both states.
+    if (step.shot !== undefined) {
+      await page.screenshot({ path: step.shot, fullPage: true });
+      console.log("wrote", step.shot);
+    }
     if (step.press !== undefined) {
       await page.waitForSelector(step.press, { timeout: 10_000 });
       await page.click(step.press);

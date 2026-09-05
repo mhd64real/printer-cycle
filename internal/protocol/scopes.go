@@ -38,6 +38,11 @@ var methodScopes = map[string]string{
 	"jobs.submit": store.ScopeJobsSubmit,
 	"jobs.commit": store.ScopeJobsSubmit,
 
+	// jobs.read is the floor. Asking for everybody's jobs needs jobs.read.all
+	// on top, checked in the handler because it depends on what was asked for.
+	"jobs.list":   store.ScopeJobsRead,
+	"jobs.cancel": store.ScopeJobsCancel,
+
 	"identity.resolve":     store.ScopeIdentityLink,
 	"identity.linkRequest": store.ScopeIdentityLink,
 	"identity.links":       store.ScopeIdentityLink,
@@ -230,4 +235,19 @@ func (c *conn) usersList(ctx context.Context) (any, error) {
 		})
 	}
 	return map[string]any{"users": out}, nil
+}
+
+// hasScope reports whether a connector holds a permission.
+//
+// For the cases where a method's own table entry is only the floor: jobs.list
+// is allowed with jobs.read, but asking it for everybody's jobs needs
+// jobs.read.all as well, which the table cannot express because it depends on
+// what was asked for rather than on which method was called.
+func hasScope(connector *store.Connector, scope string) bool {
+	for _, held := range connector.Scopes {
+		if held == scope {
+			return true
+		}
+	}
+	return false
 }

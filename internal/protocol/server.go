@@ -386,6 +386,10 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.printersRemove(ctx, params)
 	case "jobs.submit":
 		return c.jobsSubmit(ctx, params)
+	case "jobs.list":
+		return c.jobsList(ctx, params)
+	case "jobs.cancel":
+		return c.jobsCancel(ctx, params)
 	case "jobs.commit":
 		return c.jobsCommit(ctx, params)
 	case "identity.resolve":

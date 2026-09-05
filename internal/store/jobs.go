@@ -65,7 +65,7 @@ func (db *DB) CreateJob(ctx context.Context, spec JobSpec) (Job, error) {
 
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO jobs (id, printer_id, user_id, connector_id, name, document_format, state)
-		 VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+		 VALUES (?, ?, ?, ?, ?, ?, 'queued')`,
 		id, spec.PrinterID, user, connector, spec.Name, spec.DocumentFormat)
 	if err != nil {
 		return Job{}, err
@@ -129,9 +129,14 @@ func (db *DB) UpdateJob(ctx context.Context, id string, u JobUpdate) error {
 	return requireOneRow(res)
 }
 
+// isTerminalState reports whether a job has stopped moving.
+//
+// These are printer-cycle's state names, not IPP's. Core translates at the
+// point it reads a printing event, so "completed" and "aborted" never reach
+// this far; see jobStateName in the protocol package.
 func isTerminalState(state string) bool {
 	switch state {
-	case "completed", "cancelled", "aborted", "failed":
+	case "done", "cancelled", "failed":
 		return true
 	}
 	return false

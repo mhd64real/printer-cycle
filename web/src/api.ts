@@ -24,6 +24,47 @@ export type Printer = {
   restricted: boolean;
 };
 
+/**
+ * A print job.
+ *
+ * The states are printer-cycle's, not IPP's: core translates, so a page never
+ * sees "processing" or "aborted".
+ */
+export type JobState =
+  | "queued"
+  | "held"
+  | "printing"
+  | "stopped"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export type Job = {
+  job_id: string;
+  printer_id: string;
+  user_id: string;
+  name: string;
+  document_format?: string;
+  state: JobState;
+  state_reasons?: string;
+  size_bytes: number;
+  pages_done: number;
+  pages_total: number;
+  created_at: string;
+  completed_at?: string;
+};
+
+/** What core pushes when a job moves. A subset of Job, keyed the same way. */
+export type JobUpdate = {
+  job_id: string;
+  printer_id: string;
+  state: JobState;
+  state_reasons?: string;
+  pages_done: number;
+  pages_total: number;
+  produced_no_output?: boolean;
+};
+
 export type Device = {
   /**
    * Stable across a discovery run, and the right thing to key a list on.
@@ -150,6 +191,11 @@ export const api = {
     }),
 
   removePrinter: (id: string) => call<{ removed: string }>("printers.remove", { id }),
+
+  jobs: (limit = 50) => call<{ jobs: Job[] }>("jobs.list", { limit }),
+
+  cancelJob: (jobId: string) =>
+    call<{ job_id: string; state: JobState }>("jobs.cancel", { job_id: jobId }),
 
   /**
    * Sends a document to a printer.

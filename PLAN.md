@@ -1502,7 +1502,41 @@ takes an index.
 ### Stage 49: Jobs page with live status
 - Driven by pushes, never by polling. Cancel button.
 - **Done when:** state changes appear without a refresh.
-- **Status:** todo
+- **Status:** done, 2026-09-05. Proven by holding a CUPS queue, submitting from outside the browser,
+  and photographing the same never-reloaded page reading "Waiting on Paper Tray" with a Stop button
+  and then "Printed on Paper Tray". Stop was driven from the interface too: CUPS had the job queued,
+  the button cancelled it, and CUPS no longer had it.
+- Added `jobs.list` and `jobs.cancel`, which the scope table had named since Stage 30 and nothing had
+  ever implemented.
+- The list is fetched once and everything after is a push. A job the page has never heard of, from
+  another connector or another tab, makes it fetch again: still not polling, because nothing happens
+  until core says something did.
+- Cancelling somebody else's job needs `jobs.read.all` as well as `jobs.cancel`, and a job belonging
+  to somebody else reports as unknown rather than refused, so asking is not a way to learn it exists.
+- Cancelling a job that already finished is not an error. It reports the state the job reached rather
+  than claiming to have stopped it, because somebody may be holding the paper.
+
+**The documented job states were fiction.** PROTOCOL.md had promised `queued`, `rendering`,
+`printing`, `done`, `failed`, `cancelled` since the spec was written. Core never emitted any of them:
+it wrote IPP's own names straight into the record and into every notification, so connectors were
+told `processing`, `completed` and `aborted`. A connector author switching on the documented names
+would have matched nothing at all.
+
+**And the two vocabularies were mixed inside one function.** `finishJob` returned `e.JobState.String()`
+for the ordinary case and a hand-written `"failed"` for a job that printed nothing, so the same
+function spoke both. The translation was missing in three separate places: the event watcher, the
+terminal-state handler, and the reply to `jobs.commit`. The last of those meant the connector's own
+`jobs.commit` result said `pending` where the spec said `queued`.
+
+`rendering` is gone with the fix rather than implemented. CUPS reports `processing` while a filter
+runs and while paper moves, with nothing to tell the two apart, so it could only ever have been
+guessed at, and guessing is what the `driverless` field was removed for at Stage 32. `held` and
+`stopped` take its place because they are real, reachable, and mean something different to somebody
+looking at a queue: "the printer needs attention" is worth saying out loud.
+
+**No migration was written for existing rows.** Nothing is released and no installation exists that
+this could break, so a migration would be ceremony over data that lives only on a development
+machine. If that stops being true before Stage 58 ships, it has to be written.
 
 ### Stage 50: Connectors page and the generic settings renderer
 - List installed connectors, enable and disable, and render any settings schema without knowing
@@ -1910,3 +1944,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   now passes core's error codes to the page so a refusal can be acted on rather than only shown.
   Recorded that CUPS ignores the model filter when a make is also given, which is a silent wrong
   answer rather than an error, and is now covered by a test.
+- **2026-09-05, after Stage 49:** implemented `jobs.list` and `jobs.cancel`, which the scope table had
+  named since Stage 30 and nothing had ever provided. Corrected the job states, which the spec had
+  documented and core had never emitted, in the three places the translation was missing. Dropped
+  `rendering` rather than implement a state CUPS cannot distinguish.

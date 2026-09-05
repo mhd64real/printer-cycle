@@ -358,7 +358,7 @@ func (c *conn) jobsCommit(ctx context.Context, params json.RawMessage) (any, err
 	}
 
 	cupsID := s.cupsJob.ID
-	state := s.cupsJob.State.String()
+	state := jobStateName(s.cupsJob.State)
 	if err := c.db.UpdateJob(ctx, s.jobID, store.JobUpdate{
 		CUPSJobID: &cupsID,
 		State:     &state,
@@ -456,7 +456,7 @@ func (c *conn) reapStreams(ctx context.Context) {
 			c.log.Warn("abandoning a stream nothing has touched",
 				"job", s.jobID, "stream", s.id, "idle", idle)
 			s.writer.CloseWithError(errors.New("the connector stopped sending"))
-			c.failJob(context.WithoutCancel(ctx), s.jobID, "aborted")
+			c.failJob(context.WithoutCancel(ctx), s.jobID, "failed")
 		}
 	}
 }
@@ -512,7 +512,7 @@ func (c *conn) closeStreams() {
 		c.log.Warn("abandoning a document the connector never finished sending",
 			"job", s.jobID, "stream", s.id)
 		s.writer.CloseWithError(errors.New("the connector disconnected"))
-		c.failJob(context.WithoutCancel(context.Background()), s.jobID, "aborted")
+		c.failJob(context.WithoutCancel(context.Background()), s.jobID, "failed")
 	}
 }
 

@@ -78,7 +78,7 @@ func (s *Server) handleCUPSEvent(ctx context.Context, e ipp.Event) {
 		return
 	}
 
-	state := e.JobState.String()
+	state := jobStateName(e.JobState)
 	reasons := strings.Join(e.JobStateReasons, " ")
 	pagesDone := e.PagesDone
 	suspect := false
@@ -123,7 +123,7 @@ func (s *Server) handleCUPSEvent(ctx context.Context, e ipp.Event) {
 // Narrow on purpose. A job of zero bytes producing nothing is exactly right, and
 // is left alone.
 func (s *Server) finishJob(ctx context.Context, job store.Job, e ipp.Event) (state, reasons string, pages int, suspect bool) {
-	state = e.JobState.String()
+	state = jobStateName(e.JobState)
 	reasons = strings.Join(e.JobStateReasons, " ")
 	pages = e.PagesDone
 

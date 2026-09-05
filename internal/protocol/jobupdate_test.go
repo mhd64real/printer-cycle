@@ -74,7 +74,7 @@ func TestAConnectorIsToldHowItsJobIsGoing(t *testing.T) {
 			return false
 		}
 		seen = append(seen, u)
-		return u.State == "completed" || u.State == "failed" || u.State == "aborted"
+		return u.State == "done" || u.State == "failed" || u.State == "cancelled"
 	}, 60*time.Second)
 
 	for _, u := range seen {
@@ -91,15 +91,15 @@ func TestAConnectorIsToldHowItsJobIsGoing(t *testing.T) {
 	}
 
 	last := seen[len(seen)-1]
-	if last.State != "completed" {
-		t.Errorf("final state = %q, want completed", last.State)
+	if last.State != "done" {
+		t.Errorf("final state = %q, want done", last.State)
 	}
 	if last.Suspect {
 		t.Error("a job that printed was flagged as producing no output")
 	}
 
 	// Updates are a record of movement, so a state must never go backwards.
-	rank := map[string]int{"pending": 1, "held": 2, "processing": 3, "completed": 4, "failed": 4, "aborted": 4, "cancelled": 4}
+	rank := map[string]int{"queued": 1, "held": 2, "printing": 3, "stopped": 3, "done": 4, "failed": 4, "cancelled": 4}
 	highest := 0
 	for _, u := range seen {
 		r := rank[u.State]

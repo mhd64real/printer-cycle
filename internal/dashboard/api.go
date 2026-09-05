@@ -40,6 +40,9 @@ var browserMethods = map[string]bool{
 	"printers.add":              true,
 	"printers.remove":           true,
 
+	"jobs.list":   true,
+	"jobs.cancel": true,
+
 	// jobs.submit and jobs.commit are deliberately absent. They are two ends of
 	// a sequence whose middle is binary frames, and this bridge carries JSON
 	// only, so a page calling them could open a stream and never feed it: a job
@@ -62,6 +65,8 @@ var browserMethods = map[string]bool{
 // methodsNeedingSession are relayed with the signed-in person attached, because
 // they act for somebody rather than merely reading.
 var methodsNeedingSession = map[string]bool{
+	"jobs.list":        true,
+	"jobs.cancel":      true,
 	"identity.approve": true,
 	"users.create":     true,
 }

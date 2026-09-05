@@ -335,7 +335,47 @@ discarded.
 }}
 ```
 
-States: `queued`, `rendering`, `printing`, `done`, `failed`, `cancelled`.
+States: `queued`, `held`, `printing`, `stopped`, `done`, `failed`, `cancelled`.
+
+**Corrected 2026-09-05, after implementing the jobs page.** These were fiction. Core wrote IPP's own
+state names straight into the record and into every notification, so connectors were told
+`processing`, `completed` and `aborted` while this document promised `printing`, `done` and `failed`.
+A connector switching on the documented names matched nothing. Worse, the states core wrote for its
+own failures did use the documented vocabulary, so both appeared inside a single function. The
+translation was missing in three separate places: the event watcher, the terminal-state handler, and
+the reply to `jobs.commit`.
+
+`rendering` is gone with it. CUPS reports `processing` while a filter runs and while paper moves,
+with nothing to tell the two apart, so it could only ever have been guessed at. `held` and `stopped`
+take its place, because they are real, reachable, and mean something different to somebody looking at
+a queue.
+
+**jobs.list** answers what has been printed and what is printing now.
+
+```json
+{"jsonrpc":"2.0","id":14,"method":"jobs.list","params":{"limit":50}}
+```
+
+Returns `{"jobs":[...]}`, newest first, each carrying the fields a `job.updated` notification does
+plus the ones that do not change, so a client renders the list once and then applies updates to it.
+Capped at 50 by default and 500 at most: a print queue is not an archive.
+
+Scoped to one person by default, resolved from `session` or `on_behalf_of` exactly as `jobs.submit`
+is. `{"all":true}` asks for every job on the box and needs `jobs.read.all`, which is separate from
+`jobs.read` because what a household has printed is not the same thing as what you have printed.
+
+**jobs.cancel** stops a job, in CUPS and in the record.
+
+```json
+{"jsonrpc":"2.0","id":15,"method":"jobs.cancel","params":{"job_id":"job_01H..."}}
+```
+
+Requires `jobs.cancel`. Cancelling somebody else's job needs `jobs.read.all` as well: a connector
+that cannot be told a job exists should not be able to stop it. A job belonging to somebody else is
+reported as `-32004 unknown job` rather than refused, so asking is not a way to learn it exists.
+
+Cancelling a job that has already finished is not an error. It reports the state the job reached
+rather than claiming to have cancelled it, because somebody may be holding the paper.
 
 **Render serialization.** Core renders one job at a time, always. On a Zero 2 W, the CUPS filter
 chain rasterizing a PDF for an old printer is the memory ceiling of the whole system, not the Go

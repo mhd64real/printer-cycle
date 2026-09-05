@@ -101,6 +101,16 @@ export type Connector = {
   settings: Record<string, unknown>;
 };
 
+/** An external account bound to a printer-cycle user. */
+export type IdentityLink = {
+  id: string;
+  connector_id: string;
+  external_id: string;
+  user_id: string;
+  display: string;
+  created_at: string;
+};
+
 export type Device = {
   /**
    * Stable across a discovery run, and the right thing to key a list on.
@@ -256,6 +266,13 @@ export const api = {
       key,
       value,
     }),
+
+  /** Binds whatever is behind a pairing code to whoever is signed in. */
+  approveLink: (code: string) => call<{ linked: boolean }>("identity.approve", { code }),
+
+  links: () => call<{ links: IdentityLink[] }>("identity.links", {}),
+
+  revokeLink: (id: string) => call<{ revoked: string }>("identity.revoke", { id }),
 
   jobs: (limit = 50) => call<{ jobs: Job[] }>("jobs.list", { limit }),
 

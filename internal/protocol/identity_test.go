@@ -88,8 +88,10 @@ func TestTheFullPairingFlow(t *testing.T) {
 		t.Errorf("display = %q, want the name a person recognises", resolved.Display)
 	}
 
-	// And one screen can answer what is linked to this account.
-	resp = dashboard.call("identity.links", map[string]any{"user_id": user.ID})
+	// And one screen can answer what is linked to this account. The session is
+	// what says whose account that is: naming a user id without one is refused,
+	// which is TestALinkBelongsToSomebody below.
+	resp = dashboard.call("identity.links", map[string]any{"session": session})
 	if resp.Error != nil {
 		t.Fatal(resp.Error)
 	}
@@ -108,7 +110,9 @@ func TestTheFullPairingFlow(t *testing.T) {
 	}
 
 	// Revoking it takes effect immediately.
-	if resp := dashboard.call("identity.revoke", map[string]any{"id": listed.Links[0].ID}); resp.Error != nil {
+	if resp := dashboard.call("identity.revoke", map[string]any{
+		"id": listed.Links[0].ID, "session": session,
+	}); resp.Error != nil {
 		t.Fatalf("revoking: %v", resp.Error)
 	}
 	resp = telegram.call("identity.resolve", map[string]any{"external_id": "tg:887312"})
@@ -322,4 +326,160 @@ func TestRelinkingMovesAnIdentity(t *testing.T) {
 	if len(links) != 1 {
 		t.Errorf("%d links exist, want one: re-linking should move, not duplicate", len(links))
 	}
+}
+
+// A link belongs to somebody, and the scope for taking part in pairing does not
+// buy the right to see or undo everybody's.
+//
+// identity.link is held by every chat connector that pairs anyone at all. It
+// used to be the only check on both listing and revoking, so a Telegram
+// connector could enumerate every external identity on the box by omitting the
+// user id, and unlink somebody's account elsewhere with nothing but a row id.
+func TestALinkBelongsToSomebody(t *testing.T) {
+	url, db := testServer(t)
+
+	// The first account created is the administrator, so the order matters.
+	// Sara and Omar are ordinary users, which is what this test is about: an
+	// administrator seeing everything is TestAnAdministratorSeesEveryLink.
+	for _, name := range []string{"mohamed", "sara", "omar"} {
+		if _, err := db.CreateUser(ctx(), name, "", "hunter2hunter2"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	telegram := authedClient(t, url, db, "telegram", []string{store.ScopeIdentityLink})
+	dashboard := authedClient(t, url, db, "dashboard", store.KnownScopes())
+
+	sara := signIn(t, dashboard, "sara", "hunter2hunter2")
+	omar := signIn(t, dashboard, "omar", "hunter2hunter2")
+
+	// Sara pairs her Telegram account.
+	resp := telegram.call("identity.linkRequest", map[string]any{
+		"external_id": "tg:5551212", "display": "@sara", "ttl_seconds": 600,
+	})
+	if resp.Error != nil {
+		t.Fatal(resp.Error)
+	}
+	var issued struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(resp.Result, &issued); err != nil {
+		t.Fatal(err)
+	}
+	if resp := dashboard.call("identity.approve", map[string]any{
+		"code": issued.Code, "session": sara,
+	}); resp.Error != nil {
+		t.Fatal(resp.Error)
+	}
+
+	saras := listLinks(t, dashboard, map[string]any{"session": sara})
+	if len(saras) != 1 {
+		t.Fatalf("sara has %d links, want 1", len(saras))
+	}
+	linkID := saras[0].ID
+
+	// A connector holding identity.link and no session sees only what it made
+	// itself, and cannot ask about a person at all.
+	if resp := telegram.call("identity.links", map[string]any{"user_id": "*"}); resp.Error == nil {
+		t.Error("a connector asked about a user with no session and was answered")
+	}
+
+	// Omar cannot see Sara's link.
+	for _, l := range listLinks(t, dashboard, map[string]any{"session": omar}) {
+		if l.ID == linkID {
+			t.Error("one person's link was listed for another")
+		}
+	}
+
+	// Nor ask for everybody's.
+	if resp := dashboard.call("identity.links", map[string]any{
+		"session": omar, "user_id": "*",
+	}); resp.Error == nil {
+		t.Error("a non-administrator listed everybody's links")
+	}
+
+	// Nor revoke what is not his.
+	if resp := dashboard.call("identity.revoke", map[string]any{
+		"id": linkID, "session": omar,
+	}); resp.Error == nil {
+		t.Error("one person revoked another's link")
+	}
+
+	// Sara can.
+	if resp := dashboard.call("identity.revoke", map[string]any{
+		"id": linkID, "session": sara,
+	}); resp.Error != nil {
+		t.Errorf("the owner could not revoke their own link: %v", resp.Error)
+	}
+}
+
+// An administrator has to be able to see and undo everything, because somebody
+// has to.
+func TestAnAdministratorSeesEveryLink(t *testing.T) {
+	url, db := testServer(t)
+	// The first account created is the administrator, so the order matters:
+	// mohamed is one and sara is not.
+	if _, err := db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateUser(ctx(), "sara", "", "correct-horse-staple"); err != nil {
+		t.Fatal(err)
+	}
+
+	telegram := authedClient(t, url, db, "telegram", []string{store.ScopeIdentityLink})
+	dashboard := authedClient(t, url, db, "dashboard", store.KnownScopes())
+
+	admin := signIn(t, dashboard, "mohamed", "hunter2hunter2")
+	sara := signIn(t, dashboard, "sara", "correct-horse-staple")
+
+	resp := telegram.call("identity.linkRequest", map[string]any{
+		"external_id": "tg:5551212", "display": "@sara", "ttl_seconds": 600,
+	})
+	if resp.Error != nil {
+		t.Fatal(resp.Error)
+	}
+	var issued struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(resp.Result, &issued); err != nil {
+		t.Fatal(err)
+	}
+	if resp := dashboard.call("identity.approve", map[string]any{
+		"code": issued.Code, "session": sara,
+	}); resp.Error != nil {
+		t.Fatal(resp.Error)
+	}
+
+	all := listLinks(t, dashboard, map[string]any{"session": admin, "user_id": "*"})
+	if len(all) != 1 {
+		t.Fatalf("an administrator saw %d links, want 1", len(all))
+	}
+	if resp := dashboard.call("identity.revoke", map[string]any{
+		"id": all[0].ID, "session": admin,
+	}); resp.Error != nil {
+		t.Errorf("an administrator could not revoke a link: %v", resp.Error)
+	}
+}
+
+type listedLink struct {
+	ID          string `json:"id"`
+	ConnectorID string `json:"connector_id"`
+	UserID      string `json:"user_id"`
+	Display     string `json:"display"`
+}
+
+func listLinks(t *testing.T, c *client, params map[string]any) []listedLink {
+	t.Helper()
+
+	resp := c.call("identity.links", params)
+	if resp.Error != nil {
+		t.Fatalf("identity.links: %v", resp.Error)
+	}
+	var out struct {
+		Links []listedLink `json:"links"`
+	}
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out.Links
 }

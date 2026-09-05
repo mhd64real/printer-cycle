@@ -661,7 +661,21 @@ Core then notifies the connector that asked for the code, so it can carry on wit
 ```
 
 **identity.links** lists what is linked to an account and **identity.revoke** removes one. Both
-require `identity.link`. These are the screen that answers "what can reach my printing, and how do I
+require `identity.link`, and both answer according to **who is asking**, not the scope alone.
+
+- With a `session`: that person's links, whatever connector made them.
+- With a `session` belonging to an administrator: `"user_id":"*"` for everybody's, or a named user.
+  A word rather than an empty string, because empty already means "whoever is asking" and a caller
+  that forgot to fill the field in should get its own links rather than the machine's.
+- With no session: the calling connector's own links, which is how it knows who it can act for.
+
+Revoking follows the same rule, and refuses with "no such link" rather than a denial, so trying ids
+is not a way to learn which ones exist.
+
+**Corrected 2026-09-05.** The scope was the only check, and `identity.link` is held by every chat
+connector that pairs anybody at all. So one could list every external identity on the box by omitting
+the user id, and unlink somebody's account elsewhere with nothing more than a row id. Neither is
+within what "may take part in pairing" should buy. These are the screen that answers "what can reach my printing, and how do I
 stop it", which exists only because core owns the bindings; one user table per connector would mean
 one such screen per connector, and in practice none.
 

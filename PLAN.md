@@ -1583,7 +1583,38 @@ anybody using it, so nothing was broken, but it was the one field type that coul
 ### Stage 51: Identity link approval
 - The screen where a pairing code is approved, plus the list of linked identities with revoke.
 - **Done when:** a link can be approved and revoked from the browser.
-- **Status:** todo
+- **Status:** done, 2026-09-05. A second connector, written from the spec, asked core for a pairing
+  code and printed it; the code was typed into the browser, the link appeared in the list, and the
+  connector was told through `identity.linked` without polling. Unlinking from the browser emptied
+  the list.
+- One list, in one place, because core owns the bindings. A connector decides how a code is
+  delivered and nothing else, so there is no separate account page inside every connector somebody
+  installs.
+
+**Anybody holding `identity.link` could read and undo everybody's links.** The scope was the only
+check, and it is held by every chat connector that pairs anyone at all: omitting the user id listed
+every external identity on the box, and revoking took a row id and no questions. Now a session says
+who is asking. Your own links, or anybody's if you are an administrator, or the calling connector's
+own when no person is involved. Revoking refuses with "no such link" rather than a denial, so trying
+ids is not a way to learn which exist.
+
+**An internal error left no trace anywhere.** `connectors.setEnabled` returned "internal error" and
+nothing was written to any log, so there was nothing to go on. Unexpected errors are deliberately
+opaque on the wire, because they may name a file path, a query or a table and a connector on the
+network has no business seeing those. They were opaque to the operator too. They are now logged
+before being flattened, and the very next run named the cause in one line.
+
+**Which was: a connector could not be switched on until it had enrolled.** So the order was invite,
+start it, watch it be turned away, come back and switch it on, start it again. Being switched on is
+an administrator saying this may run, which can be said before the thing has run once. The rule
+existed because an enabled unenrolled entry would "look live and reject every connection", and the
+connectors page now says "waiting to be enrolled" for precisely that state, so the reason had already
+stopped being true.
+
+**And enrolling used to force the switch off**, which would have quietly undone the decision above:
+switched on in the evening, switched off by the thing itself on first contact, with nothing to say
+why. Enrolling now leaves the flag alone. A new connector is still created switched off, which is
+what made "enrolling does not enable anything" true in the first place.
 
 ### Stage 52: Users page, hidden until needed
 - Invisible while there is one user, appears when a second is added.
@@ -1988,3 +2019,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   which no connector could be added to a running system at all. Core now tells a correctly
   authenticated but switched-off connector why it was refused. Fixed a test whose goroutine outlived
   it, which had been dismissed as a cascade twice.
+- **2026-09-05, after Stage 51:** identity links are now answered by who is asking rather than by the
+  scope alone, which any chat connector holds. Unexpected errors are logged before being flattened to
+  "internal error", which found the next two bugs by itself: a connector could not be switched on
+  before enrolling, and enrolling forced the switch back off.

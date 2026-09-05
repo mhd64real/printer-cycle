@@ -141,7 +141,8 @@ func (c *conn) identityApprove(ctx context.Context, params json.RawMessage) (any
 // exists to avoid.
 func (c *conn) identityLinks(ctx context.Context, params json.RawMessage) (any, error) {
 	var p struct {
-		UserID string `json:"user_id"`
+		UserID  string `json:"user_id"`
+		Session string `json:"session"`
 	}
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &p); err != nil {
@@ -149,7 +150,7 @@ func (c *conn) identityLinks(ctx context.Context, params json.RawMessage) (any, 
 		}
 	}
 
-	links, err := c.db.IdentityLinks(ctx, p.UserID)
+	links, err := c.linksVisibleTo(ctx, p.Session, p.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -173,13 +174,93 @@ func (c *conn) identityLinks(ctx context.Context, params json.RawMessage) (any, 
 	return map[string]any{"links": out}, nil
 }
 
+// linksVisibleTo answers who is allowed to see which links.
+//
+// The scope alone used to decide this, and the scope is held by every chat
+// connector that pairs anybody at all. So a Telegram connector could list every
+// external identity on the box by omitting the user id, and unlink somebody's
+// Signal account by guessing at nothing more than a row id. Both of those are
+// well outside what "may take part in pairing" should buy.
+//
+// Three cases, each with a real use:
+//
+//   - With a session, a person sees their own links, whatever connector made
+//     them. This is the screen that answers "what can reach my printing".
+//   - With a session belonging to an administrator, they may name somebody else
+//     or ask for all of them, because somebody has to be able to.
+//   - With no session, a connector sees the links it made itself, which is how
+//     it knows who it can act for, and nothing else.
+func (c *conn) linksVisibleTo(ctx context.Context, session, wantUser string) ([]store.IdentityLink, error) {
+	self := c.authenticated()
+
+	if strings.TrimSpace(session) == "" {
+		if wantUser != "" {
+			return nil, jsonrpc.Errorf(jsonrpc.CodeNotAuthenticated,
+				"reading somebody's links needs their session")
+		}
+		links, err := c.db.IdentityLinks(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		mine := links[:0]
+		for _, l := range links {
+			if l.ConnectorID == self.ID {
+				mine = append(mine, l)
+			}
+		}
+		return mine, nil
+	}
+
+	actor, err := c.userFromSession(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+
+	if wantUser == "" || wantUser == actor.ID {
+		return c.db.IdentityLinks(ctx, actor.ID)
+	}
+	if !actor.IsAdmin {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeScopeDenied,
+			"only an administrator can see somebody else's links")
+	}
+	if wantUser == allUsers {
+		return c.db.IdentityLinks(ctx, "")
+	}
+	return c.db.IdentityLinks(ctx, wantUser)
+}
+
+// allUsers is what an administrator passes as user_id to mean everybody.
+//
+// A word rather than an empty string, because empty already means "whoever is
+// asking" and a caller that forgot to fill the field in should get its own
+// links rather than the whole machine's.
+const allUsers = "*"
+
 // identityRevoke removes a link.
+//
+// Same rule as listing: your own, or anybody's if you are an administrator, or
+// the calling connector's own when no person is involved. Refusing with "no
+// such link" rather than a denial, so that trying ids is not a way to learn
+// which ones exist.
 func (c *conn) identityRevoke(ctx context.Context, params json.RawMessage) (any, error) {
 	var p struct {
-		ID string `json:"id"`
+		ID      string `json:"id"`
+		Session string `json:"session"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
+	}
+
+	link, err := c.db.IdentityLink(ctx, p.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "no such link")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if err := c.mayRevoke(ctx, p.Session, link); err != nil {
+		return nil, err
 	}
 
 	if err := c.db.DeleteIdentityLink(ctx, p.ID); errors.Is(err, store.ErrNotFound) {
@@ -187,7 +268,27 @@ func (c *conn) identityRevoke(ctx context.Context, params json.RawMessage) (any,
 	} else if err != nil {
 		return nil, err
 	}
+
+	c.log.Info("identity link revoked", "link", p.ID, "connector", link.ConnectorID)
 	return map[string]any{"revoked": p.ID}, nil
+}
+
+func (c *conn) mayRevoke(ctx context.Context, session string, link store.IdentityLink) error {
+	if strings.TrimSpace(session) == "" {
+		if link.ConnectorID == c.authenticated().ID {
+			return nil
+		}
+		return jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "no such link")
+	}
+
+	actor, err := c.userFromSession(ctx, session)
+	if err != nil {
+		return err
+	}
+	if actor.ID == link.UserID || actor.IsAdmin {
+		return nil
+	}
+	return jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "no such link")
 }
 
 // notifyIdentityLinked tells a connector that a pairing it started completed.

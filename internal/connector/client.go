@@ -155,7 +155,7 @@ func (c *Client) session(ctx context.Context) error {
 		return err
 	}
 
-	rpc := jsonrpc.New(&wsTransport{ws: ws}, jsonrpc.HandlerFunc(
+	rpc := jsonrpc.NewWithLogger(c.log, &wsTransport{ws: ws}, jsonrpc.HandlerFunc(
 		func(ctx context.Context, method string, params json.RawMessage) (any, error) {
 			// Core sends notifications rather than requests, so anything with an
 			// id is something this build does not know about.

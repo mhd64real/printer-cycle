@@ -70,6 +70,8 @@ var methodsNeedingSession = map[string]bool{
 	"jobs.list":        true,
 	"jobs.cancel":      true,
 	"identity.approve": true,
+	"identity.links":   true,
+	"identity.revoke":  true,
 	"users.create":     true,
 }
 

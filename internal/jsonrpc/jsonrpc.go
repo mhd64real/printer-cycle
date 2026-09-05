@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -119,6 +120,16 @@ type Conn struct {
 	pending   map[string]chan *message
 	closed    bool
 	closeErr  error
+
+	// log records what the wire is not told.
+	//
+	// An unexpected error is flattened to "internal error" before it leaves,
+	// because it may name a file path, a query or a table and a connector on
+	// the network has no business seeing any of those. It was flattened for the
+	// operator too, though, so a real fault produced two words and no trace of
+	// itself anywhere. Whoever runs the machine should be able to find out what
+	// happened on it.
+	log *slog.Logger
 }
 
 // New returns a connection. Incoming requests go to handler, which may be nil
@@ -133,7 +144,22 @@ func New(t Transport, h Handler) *Conn {
 		transport: t,
 		handler:   h,
 		pending:   make(map[string]chan *message),
+		log:       slog.Default(),
 	}
+}
+
+// WithLogger records unexpected errors somewhere findable. Optional: without
+// one they go to the default logger.
+func (c *Conn) WithLogger(log *slog.Logger) *Conn {
+	if log != nil {
+		c.log = log
+	}
+	return c
+}
+
+// NewWithLogger is New for a caller that has a logger to hand.
+func NewWithLogger(log *slog.Logger, t Transport, h Handler) *Conn {
+	return New(t, h).WithLogger(log)
 }
 
 // Serve reads and dispatches until the transport fails or ctx ends.
@@ -251,6 +277,7 @@ func (c *Conn) dispatch(ctx context.Context, m *message) {
 	case err == nil:
 		encoded, encErr := json.Marshal(result)
 		if encErr != nil {
+			c.log.Error("cannot encode a reply", "method", m.Method, "error", encErr)
 			resp.Error = Errorf(CodeInternalError, "internal error")
 			break
 		}
@@ -264,9 +291,11 @@ func (c *Conn) dispatch(ctx context.Context, m *message) {
 			resp.Error = rpcErr
 			break
 		}
-		// Deliberately opaque. An unexpected error from inside core may name
-		// a file path, a query, or a table, none of which a connector on the
-		// network has any business seeing.
+		// Deliberately opaque on the wire, and recorded here. An unexpected
+		// error from inside core may name a file path, a query, or a table,
+		// none of which a connector on the network has any business seeing.
+		// Whoever runs the machine does.
+		c.log.Error("a method failed unexpectedly", "method", m.Method, "error", err)
 		resp.Error = Errorf(CodeInternalError, "internal error")
 	}
 

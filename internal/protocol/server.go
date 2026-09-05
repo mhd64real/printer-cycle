@@ -315,7 +315,8 @@ func (s *Server) handleConnector(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	c.rpc = jsonrpc.New(&wsTransport{ws: ws, log: c.log, onBinary: c.writeChunk}, c)
+	c.rpc = jsonrpc.New(&wsTransport{ws: ws, log: c.log, onBinary: c.writeChunk}, c).
+		WithLogger(c.log)
 	defer c.closeStreams()
 
 	reapCtx, stopReaper := context.WithCancel(ctx)

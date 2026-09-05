@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/Button";
 import { Connectors } from "@/screens/Connectors";
 import { Jobs } from "@/screens/Jobs";
+import { Links } from "@/screens/Links";
 import { Print } from "@/screens/Print";
 import { Printers } from "@/screens/Printers";
 import { api, type User } from "@/api";
@@ -12,6 +13,7 @@ const TABS = [
   { key: "jobs", label: "Jobs" },
   { key: "printers", label: "Printers" },
   { key: "connectors", label: "Connectors" },
+  { key: "links", label: "Linked accounts" },
 ] as const;
 
 type Tab = (typeof TABS)[number]["key"];
@@ -64,8 +66,10 @@ export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => voi
           <Jobs />
         ) : tab === "printers" ? (
           <Printers />
-        ) : (
+        ) : tab === "connectors" ? (
           <Connectors />
+        ) : (
+          <Links />
         )}
       </main>
     </div>

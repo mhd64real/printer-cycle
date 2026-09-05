@@ -155,24 +155,22 @@ func TestEnrolRejectsAKeyOfTheWrongSize(t *testing.T) {
 	}
 }
 
-// Enabling a connector that cannot authenticate would leave an entry looking
-// live in the dashboard while rejecting every connection.
-func TestCannotEnableAnUnenrolledConnector(t *testing.T) {
+// Switching on a connector that has not enrolled yet is allowed, and does not
+// let it do anything.
+//
+// It used to be refused, so an administrator had to invite a connector, start
+// it, watch it be turned away, come back and switch it on, and start it again.
+// Being switched on is somebody saying this may run, which can be said before
+// the thing has run once. Authentication still needs a key, which is the part
+// that actually protects anything.
+func TestSwitchingOnAConnectorBeforeItEnrols(t *testing.T) {
 	db := newDB(t)
 	if _, err := db.CreateConnector(ctx(), "telegram", "", nil); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := db.SetConnectorEnabled(ctx(), "telegram", true); !errors.Is(err, store.ErrNotEnrolled) {
-		t.Errorf("enabling an unenrolled connector gave %v, want ErrNotEnrolled", err)
-	}
-
-	token, _ := db.NewEnrolmentToken(ctx(), "telegram", time.Hour)
-	if _, err := db.Enrol(ctx(), token, newKey(t)); err != nil {
-		t.Fatal(err)
-	}
 	if err := db.SetConnectorEnabled(ctx(), "telegram", true); err != nil {
-		t.Errorf("enabling an enrolled connector: %v", err)
+		t.Fatalf("switching on an unenrolled connector: %v", err)
 	}
 
 	c, err := db.Connector(ctx(), "telegram")
@@ -180,7 +178,25 @@ func TestCannotEnableAnUnenrolledConnector(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !c.Enabled {
-		t.Error("the connector is not enabled after being enabled")
+		t.Error("it was not recorded as switched on")
+	}
+	if c.Enrolled() {
+		t.Error("it counts as enrolled without a key, which is the thing that guards it")
+	}
+
+	// And once it enrols, it is both switched on and able to authenticate,
+	// without anybody going back to the dashboard.
+	token, _ := db.NewEnrolmentToken(ctx(), "telegram", time.Hour)
+	if _, err := db.Enrol(ctx(), token, newKey(t)); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err = db.Connector(ctx(), "telegram")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Enabled || !c.Enrolled() {
+		t.Errorf("after enrolling: enabled=%v enrolled=%v, want both", c.Enabled, c.Enrolled())
 	}
 }
 

@@ -17,7 +17,6 @@ import (
 var (
 	ErrConnectorExists  = errors.New("store: a connector with that id already exists")
 	ErrEnrolmentInvalid = errors.New("store: that enrolment token is not valid")
-	ErrNotEnrolled      = errors.New("store: the connector has not enrolled a key yet")
 )
 
 // Scopes, mirroring PROTOCOL.md section 5.
@@ -244,14 +243,20 @@ func (db *DB) Enrol(ctx context.Context, token string, publicKey ed25519.PublicK
 		return Connector{}, ErrEnrolmentInvalid
 	}
 
-	// Enrolling normally does not enable anything: an administrator decides
-	// what runs. During first run there is no administrator to decide, because
-	// creating one is what the dashboard exists to do, so possession of a valid
-	// single-use token from the machine's own console is the authorisation.
+	// Enrolling does not enable anything: an administrator decides what runs,
+	// and a new connector is created switched off, so leaving the flag alone is
+	// how that stays true.
 	//
-	// Narrow on purpose. It applies only to the dashboard, and only while no
-	// account exists. "Nothing else could hold a token on a fresh box anyway" is
-	// probably true and is not a reason to write the broader rule.
+	// Leaving it alone rather than forcing it off, which is what this used to
+	// do. An administrator can now switch a connector on before it has ever
+	// run, and forcing the flag off here would have silently thrown that
+	// decision away the moment the connector enrolled: switched on in the
+	// evening, switched off by the thing itself, and nothing to say why.
+	//
+	// During first run there is no administrator to decide, because creating
+	// one is what the dashboard exists to do, so possession of a valid
+	// single-use token from the machine's own console is the authorisation.
+	// Narrow on purpose: only the dashboard, and only while no account exists.
 	var users int
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&users); err != nil {
 		return Connector{}, err
@@ -259,9 +264,12 @@ func (db *DB) Enrol(ctx context.Context, token string, publicKey ed25519.PublicK
 	firstRun := users == 0 && connectorID == DashboardConnectorID
 
 	encoded := base64.StdEncoding.EncodeToString(publicKey)
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE connectors SET auth_method = 'ed25519', credential = ?, enabled = ? WHERE id = ?`,
-		encoded, boolToInt(firstRun), connectorID); err != nil {
+	query := `UPDATE connectors SET auth_method = 'ed25519', credential = ? WHERE id = ?`
+	args := []any{encoded, connectorID}
+	if firstRun {
+		query = `UPDATE connectors SET auth_method = 'ed25519', credential = ?, enabled = 1 WHERE id = ?`
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return Connector{}, err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -354,19 +362,16 @@ func (db *DB) Connectors(ctx context.Context) ([]Connector, error) {
 }
 
 // SetConnectorEnabled turns a connector on or off.
+//
+// A connector that has not enrolled yet may be switched on. It used to be
+// refused, on the grounds that enabling something which cannot authenticate
+// leaves an entry that looks live and rejects every connection. The dashboard
+// now says "waiting to be enrolled" for exactly that state, so the entry does
+// not look live, and the refusal only forced an order nobody would choose:
+// invite, start the connector, watch it fail, come back and switch it on,
+// start it again. Being switched on is an administrator saying this may run,
+// and it can be said before the thing has run once.
 func (db *DB) SetConnectorEnabled(ctx context.Context, id string, enabled bool) error {
-	if enabled {
-		c, err := db.Connector(ctx, id)
-		if err != nil {
-			return err
-		}
-		// Enabling something that cannot authenticate would leave an entry that
-		// looks live in the dashboard and rejects every connection.
-		if !c.Enrolled() {
-			return ErrNotEnrolled
-		}
-	}
-
 	res, err := db.ExecContext(ctx, `UPDATE connectors SET enabled = ? WHERE id = ?`,
 		boolToInt(enabled), id)
 	if err != nil {

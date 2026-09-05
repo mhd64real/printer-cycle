@@ -118,6 +118,8 @@ export type Device = {
    * distribution, so it has to be fetched separately.
    */
   needs_firmware?: boolean;
+  /** Whether that file is already here, so the printer will work. */
+  firmware_installed?: boolean;
 
   /**
    * Stable across a discovery run, and the right thing to key a list on.
@@ -230,6 +232,18 @@ export const api = {
     call<{ candidates: DriverCandidate[] }>("printers.driverCandidates", { device_id: deviceId }),
 
   /** The manufacturers there are drivers for. Around eighty on a full install. */
+  /**
+   * Fetches the firmware a printer loads from this machine at every power-on.
+   *
+   * Its own call rather than part of adding a printer: it is a download from a
+   * mirror that may be slow or gone, and burying that inside pairing would turn
+   * one clear failure into a pairing that mysteriously takes a minute.
+   */
+  installFirmware: (deviceId: string) =>
+    call<{ installed: boolean; file: string }>("printers.installFirmware", {
+      device_id: deviceId,
+    }),
+
   driverMakes: () => call<{ makes: string[] }>("printers.drivers", {}),
 
   /**

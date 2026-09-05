@@ -38,6 +38,7 @@ var browserMethods = map[string]bool{
 	"printers.drivers":          true,
 	"printers.driverCandidates": true,
 	"printers.add":              true,
+	"printers.installFirmware":  true,
 	"printers.remove":           true,
 
 	"jobs.list":   true,

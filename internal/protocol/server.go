@@ -26,6 +26,7 @@ import (
 
 	"github.com/mhd64real/printer-cycle/internal/connauth"
 	"github.com/mhd64real/printer-cycle/internal/driver"
+	"github.com/mhd64real/printer-cycle/internal/firmware"
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 	"github.com/mhd64real/printer-cycle/internal/store"
@@ -65,6 +66,10 @@ type Server struct {
 	// a filtered PPD query costs seconds against a real cupsd, every time.
 	drivers *driver.Finder
 
+	// firmware fetches what a handful of printers load from the host at every
+	// power-on and cannot print without.
+	firmware *firmware.Installer
+
 	// streamIdle is how long a document stream may go untouched. Zero means the
 	// default; tests set it short so abandonment can be observed.
 	streamIdle time.Duration
@@ -96,6 +101,11 @@ type Options struct {
 	// StreamIdle overrides how long a document stream may go untouched before
 	// it is abandoned. Zero uses [DefaultStreamIdle].
 	StreamIdle time.Duration
+
+	// Firmware fetches the files a few printers cannot print without. Settable
+	// so tests can point it at a temporary directory and a local server
+	// instead of the real mirror and /lib/firmware.
+	Firmware *firmware.Installer
 }
 
 // NewServer builds a server. It does not listen until Serve is called.
@@ -113,6 +123,10 @@ func NewServer(db *store.DB, opts Options) *Server {
 		conns:      make(map[*conn]struct{}),
 	}
 	s.drivers = driver.New(s.lookupPPDs)
+	s.firmware = opts.Firmware
+	if s.firmware == nil {
+		s.firmware = firmware.New()
+	}
 	return s
 }
 
@@ -384,6 +398,8 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.printersProbe(ctx, params)
 	case "printers.list":
 		return c.printersList(ctx)
+	case "printers.installFirmware":
+		return c.printersInstallFirmware(ctx, params)
 	case "printers.drivers":
 		return c.printersDrivers(ctx, params)
 	case "printers.driverCandidates":

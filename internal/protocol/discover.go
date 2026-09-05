@@ -58,18 +58,25 @@ type deviceView struct {
 	// is the difference between a printer that will work and one that will sit
 	// there printing nothing.
 	NeedsFirmware bool `json:"needs_firmware,omitempty"`
+
+	// FirmwareInstalled says the file is already here. Without it a page has to
+	// remember whether it fetched one this session, and would offer to fetch it
+	// again after a reload on a printer that is already working.
+	FirmwareInstalled bool `json:"firmware_installed,omitempty"`
 }
 
-func viewOf(d ipp.Device) deviceView {
-	_, needsFirmware := driver.NeedsFirmware(d.ID)
+func (c *conn) viewOf(d ipp.Device) deviceView {
+	fw, needsFirmware := driver.NeedsFirmware(d.ID)
+	installed := needsFirmware && c.server.firmware.Installed(fw.File)
 	return deviceView{
-		NeedsFirmware: needsFirmware,
-		DeviceURI:     d.URI,
-		DeviceID:      d.ID,
-		MakeAndModel:  d.MakeAndModel,
-		Info:          d.Info,
-		Location:      d.Location,
-		Transport:     d.Transport,
+		NeedsFirmware:     needsFirmware,
+		FirmwareInstalled: installed,
+		DeviceURI:         d.URI,
+		DeviceID:          d.ID,
+		MakeAndModel:      d.MakeAndModel,
+		Info:              d.Info,
+		Location:          d.Location,
+		Transport:         d.Transport,
 	}
 }
 
@@ -123,7 +130,7 @@ func (c *conn) printersDiscover(ctx context.Context, params json.RawMessage) (an
 	seen := make(map[string]int, 8)
 
 	err := c.server.cups.DiscoverDevices(ctx, timeout, func(d ipp.Device) {
-		view := viewOf(d)
+		view := c.viewOf(d)
 
 		// One printer, announced once.
 		//

@@ -59,6 +59,11 @@ type firmwareView struct {
 	Needed bool   `json:"needed"`
 	File   string `json:"file,omitempty"`
 	Model  string `json:"model,omitempty"`
+
+	// Installed says the file is already here, so the printer will work. The
+	// difference between "this needs something" and "this needs something it
+	// does not have" is the whole of what somebody wants to know.
+	Installed bool `json:"installed"`
 }
 
 type driverCandidatesParams struct {
@@ -98,7 +103,12 @@ func (c *conn) printersDriverCandidates(ctx context.Context, params json.RawMess
 	// the list instead of inside it.
 	view := firmwareView{}
 	if fw, needed := driver.NeedsFirmware(p.DeviceID); needed {
-		view = firmwareView{Needed: true, File: fw.File, Model: fw.Model}
+		view = firmwareView{
+			Needed:    true,
+			File:      fw.File,
+			Model:     fw.Model,
+			Installed: c.server.firmware.Installed(fw.File),
+		}
 	}
 
 	return map[string]any{"candidates": candidates, "firmware": view}, nil
@@ -498,4 +508,42 @@ func canDeriveDriver(uri string) bool {
 		return true
 	}
 	return false
+}
+
+type installFirmwareParams struct {
+	DeviceID string `json:"device_id"`
+}
+
+// printersInstallFirmware fetches what a printer loads from this machine.
+//
+// Its own method rather than part of pairing. The download is a network round
+// trip to a mirror that may be slow or gone, and burying that inside printers.add
+// would turn one clear failure into a pairing that mysteriously takes a minute
+// and then fails for reasons about somebody's wifi.
+//
+// Idempotent: a file already in place is a success, not a second download.
+func (c *conn) printersInstallFirmware(ctx context.Context, params json.RawMessage) (any, error) {
+	var p installFirmwareParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
+	}
+
+	fw, needed := driver.NeedsFirmware(p.DeviceID)
+	if !needed {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams,
+			"this printer does not need firmware from this machine")
+	}
+
+	if err := c.server.firmware.Install(ctx, fw.File); err != nil {
+		// Passed through rather than flattened. Every message the firmware
+		// package produces is written for whoever is looking at the screen, and
+		// replacing them with "could not install firmware" would undo the whole
+		// point of the exercise.
+		c.log.Warn("could not install printer firmware",
+			"file", fw.File, "model", fw.Model, "error", err)
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInternalError, "%s", err.Error())
+	}
+
+	c.log.Info("printer firmware installed", "file", fw.File, "model", fw.Model)
+	return map[string]any{"installed": true, "file": fw.File}, nil
 }

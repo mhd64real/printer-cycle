@@ -300,7 +300,28 @@ function DeviceRow({
   const [error, setError] = useState<string | null>(null);
   const [choosingDriver, setChoosingDriver] = useState(false);
 
+  const [fetching, setFetching] = useState(false);
+  // Seeded from what core said, so a reload does not offer to fetch a file that
+  // is already there.
+  const [firmwareDone, setFirmwareDone] = useState(!!device.firmware_installed);
+  const [firmwareError, setFirmwareError] = useState<string | null>(null);
+
   const name = displayName(device);
+
+  async function getFirmware() {
+    setFetching(true);
+    setFirmwareError(null);
+    try {
+      await api.installFirmware(device.device_id);
+      setFirmwareDone(true);
+    } catch (err) {
+      setFirmwareError(
+        err instanceof Error ? err.message : "the firmware could not be fetched",
+      );
+    } finally {
+      setFetching(false);
+    }
+  }
 
   async function pair(driver?: DriverCandidate) {
     setBusy(true);
@@ -345,7 +366,7 @@ function DeviceRow({
             {device.make_and_model ? "" : ", model unknown"}
           </p>
           {device.needs_firmware ? (
-            <p className="mt-1 text-sm text-muted">
+            <div className="mt-1">
               {/*
                 Said before pairing rather than after, because this is the
                 difference between a printer that works and one that sits there
@@ -353,11 +374,36 @@ function DeviceRow({
                 not in the same words as a driver needing a proprietary plugin:
                 that one is a wall, this one is a wait.
               */}
-              This model keeps no firmware of its own and loads it from this
-              machine every time it is switched on. The file cannot be shipped
-              with Linux, so it has to be fetched once before the printer will
-              print anything.
-            </p>
+              <p className="text-sm text-muted">
+                This model keeps no firmware of its own and loads it from this
+                machine every time it is switched on. The file cannot be shipped
+                with Linux, so it has to be fetched once before the printer will
+                print anything.
+              </p>
+              {firmwareDone ? (
+                <p className="mt-1 text-sm text-muted">The firmware is here now.</p>
+              ) : (
+                <Button
+                  variant="plain"
+                  className="mt-2"
+                  onClick={getFirmware}
+                  disabled={fetching}
+                >
+                  {fetching ? "Fetching" : "Fetch the firmware"}
+                </Button>
+              )}
+              {firmwareError ? (
+                <div className="mt-2">
+                  {/*
+                    Core's own words, not a summary of them. Every message the
+                    firmware fetcher produces is written for whoever is looking
+                    at this screen, and it is the difference between "offline"
+                    and "the mirror moved".
+                  */}
+                  <Notice>{firmwareError}</Notice>
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
         <Button onClick={() => pair()} disabled={busy || choosingDriver}>

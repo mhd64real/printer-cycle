@@ -1767,7 +1767,34 @@ a reproducible report: the device id, the ppd, and what came out of the printer.
 ### Stage 56: Firmware fetch flow
 - Fetch at pair time, with a clear message when the box is offline. Never fail silently.
 - **Done when:** the offline case explains itself instead of printing nothing.
-- **Status:** todo
+- **Status:** done, 2026-09-06. Both paths driven through the browser: a mirror that cannot be
+  resolved produces "this machine could not look up ..., so it is probably not connected to the
+  internet. The firmware has to be downloaded once; after that the printer works offline", on the
+  row, in place. Against a local mirror the file downloads, converts and installs, and the row stops
+  offering to fetch it.
+
+**Its own method, not part of pairing.** The download is a round trip to a mirror that may be slow or
+gone. Inside `printers.add` that would turn one clear failure into a pairing that mysteriously takes
+a minute and then fails for reasons about somebody's wifi.
+
+**Six failures, six messages.** Offline, the mirror having moved, a captive portal serving a login
+page instead of an archive, an archive without the firmware in it, the converter not installed, the
+destination not writable. Each is a different thing to do next, and "could not install firmware"
+would be none of them. Core passes them through unchanged rather than flattening them.
+
+**Checked before the download, not after.** Whether the destination is writable and whether the
+converter exists are both known in advance, and finding out after a slow download that the result
+cannot be saved is the sort of thing that makes people give up.
+
+**Nothing half-written is ever left behind.** The converted file goes to a temporary name in the
+destination directory and is renamed into place, because a truncated firmware file is worse than none
+at all: the printer would accept it.
+
+**The manufacturer's own copies are gone.** Every `ftp.hp.com` URL in the driver package's fetch
+script is commented out, and the live ones point at a third-party mirror. That is why `--firmware-mirror`
+and `--firmware-dir` are flags: a box behind a firewall, or an owner who would rather not fetch from
+a stranger, needs somewhere else to point. It is also why a failed download names the host rather
+than saying "download failed", so the day that mirror disappears the message says so.
 
 ---
 
@@ -2149,3 +2176,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   the other is a wall. The known-bad list ships empty on purpose. Added Stage 55b: manufacturer
   aliases exist in Go and printer naming happens in TypeScript, which is why "Hewlett-Packard HP
   LaserJet 1018" survives a de-stutter that was written for "HP HP LaserJet".
+- **2026-09-06, after Stage 56:** firmware fetching is its own method with its own messages, six of
+  them, because "could not install firmware" is not something anybody can act on. Added
+  `--firmware-mirror` and `--firmware-dir`, since the driver package now fetches from a third-party
+  mirror and the manufacturer's own copies are gone.

@@ -34,6 +34,7 @@ var methodScopes = map[string]string{
 	"connectors.setEnabled":     store.ScopeConnectorsManage,
 	"printers.drivers":          store.ScopePrintersRead,
 	"printers.driverCandidates": store.ScopePrintersRead,
+	"printers.installFirmware":  store.ScopePrintersManage,
 	"printers.add":              store.ScopePrintersManage,
 	"printers.remove":           store.ScopePrintersManage,
 

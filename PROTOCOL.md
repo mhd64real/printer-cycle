@@ -523,6 +523,28 @@ Two signals arrive inside `ppd-make-and-model` and both are ranking inputs:
 ]}}
 ```
 
+**printers.installFirmware** fetches what a printer loads from this machine at every power-on.
+Requires `printers.manage`.
+
+```json
+{"jsonrpc":"2.0","id":16,"method":"printers.installFirmware","params":{"device_id":"MFG:HP;MDL:LaserJet 1018;"}}
+```
+
+A handful of printers hold no firmware of their own. Until the file is here they print nothing and
+report no error, which is the most common way an old printer looks unsupported when it is not.
+Discovery and probe carry `needs_firmware` and `firmware_installed` on the device, so a client knows
+before pairing rather than after.
+
+Its own method rather than part of `printers.add`, because it is a download from a third-party
+mirror that may be slow or gone, and burying that inside pairing turns one clear failure into a
+pairing that mysteriously takes a minute. Idempotent: a file already in place is a success.
+
+**Every failure says which one it was, in words.** Being offline, the mirror having moved, a captive
+portal serving a login page instead of an archive, the converter not being installed, the destination
+not being writable. Core passes those messages through unchanged rather than flattening them, because
+the difference between "wait until you have a network" and "look somewhere else" is the whole value
+of the message.
+
 **printers.drivers** browses the driver catalogue, for a printer nothing can identify.
 
 ```json

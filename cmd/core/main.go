@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/mhd64real/printer-cycle/internal/firmware"
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/protocol"
 	"github.com/mhd64real/printer-cycle/internal/store"
@@ -38,6 +39,16 @@ func run() error {
 		socketPath  = flag.String("socket", "", "additional unix socket for connectors on this machine")
 		cupsAddr    = flag.String("cups", defaultCUPS(), "how to reach CUPS: a unix:// socket or an http:// address")
 		logLevel    = flag.String("log-level", "info", "debug, info, warn, or error")
+
+		// A handful of printers load their firmware from this machine at every
+		// power-on. Both of these are settable because the file comes from a
+		// third-party mirror over the internet, and a box behind a firewall, or
+		// one whose owner would rather not fetch from a stranger, needs
+		// somewhere else to point.
+		firmwareMirror = flag.String("firmware-mirror", firmware.DefaultMirror,
+			"where to fetch printer firmware from")
+		firmwareDir = flag.String("firmware-dir", firmware.DefaultDir,
+			"where to put printer firmware")
 	)
 	flag.Parse()
 
@@ -87,7 +98,15 @@ func run() error {
 	log.Info("printer-cycle core starting",
 		"version", version.Version, "data", *dataDir, "cups", *cupsAddr)
 
-	server := protocol.NewServer(db, protocol.Options{Logger: log, CUPS: cups})
+	server := protocol.NewServer(db, protocol.Options{
+		Logger: log,
+		CUPS:   cups,
+		Firmware: &firmware.Installer{
+			Mirror:    *firmwareMirror,
+			Dir:       *firmwareDir,
+			Converter: "arm2hpdl",
+		},
+	})
 	if err := server.Serve(ctx, addrs...); err != nil {
 		return err
 	}

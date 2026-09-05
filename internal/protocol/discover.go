@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mhd64real/printer-cycle/internal/driver"
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 )
@@ -47,16 +48,28 @@ type deviceView struct {
 	Info         string `json:"info"`
 	Location     string `json:"location"`
 	Transport    string `json:"transport"`
+
+	// NeedsFirmware marks a printer that loads its firmware from this machine
+	// at every power-on, from a file no distribution may ship. Carried on the
+	// device rather than fetched separately because it costs nothing: it is a
+	// lookup against a short list, not a question for CUPS.
+	//
+	// It belongs here, on the row somebody is about to press Add on, because it
+	// is the difference between a printer that will work and one that will sit
+	// there printing nothing.
+	NeedsFirmware bool `json:"needs_firmware,omitempty"`
 }
 
 func viewOf(d ipp.Device) deviceView {
+	_, needsFirmware := driver.NeedsFirmware(d.ID)
 	return deviceView{
-		DeviceURI:    d.URI,
-		DeviceID:     d.ID,
-		MakeAndModel: d.MakeAndModel,
-		Info:         d.Info,
-		Location:     d.Location,
-		Transport:    d.Transport,
+		NeedsFirmware: needsFirmware,
+		DeviceURI:     d.URI,
+		DeviceID:      d.ID,
+		MakeAndModel:  d.MakeAndModel,
+		Info:          d.Info,
+		Location:      d.Location,
+		Transport:     d.Transport,
 	}
 }
 

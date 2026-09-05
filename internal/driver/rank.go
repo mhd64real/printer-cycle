@@ -33,6 +33,12 @@ type Candidate struct {
 	// installer rather than differently opaque.
 	Score int
 	Why   []string
+
+	// Blocked is why this driver must never be used for this printer, when it
+	// must not. Empty otherwise. A blocked driver is still listed, because
+	// hiding it means somebody looks for it, finds nothing, and concludes the
+	// software has not noticed their printer.
+	Blocked string
 }
 
 // signal is one reason to prefer a driver.
@@ -132,6 +138,16 @@ func Rank(printerDeviceID string, candidates []Candidate) []Candidate {
 		drv := deviceid.Parse(ranked[i].DeviceID)
 		ranked[i].Score = 0
 		ranked[i].Why = nil
+		ranked[i].Blocked = ""
+
+		if why, no := blockedBy(printer, ranked[i]); no {
+			// Scored below anything that is merely a poor fit, so it sorts to
+			// the bottom rather than competing.
+			ranked[i].Blocked = why
+			ranked[i].Score = -1
+			continue
+		}
+
 		for _, s := range signals {
 			if s.test(printer, drv, ranked[i]) {
 				ranked[i].Score += s.weight
@@ -164,6 +180,12 @@ func Best(printerDeviceID string, candidates []Candidate) (Candidate, bool) {
 
 	first := ranked[0]
 	printer := deviceid.Parse(printerDeviceID)
+
+	// Everything was refused, so there is nothing to offer and nothing to
+	// apply. Reported rather than returned as a choice nobody may take.
+	if first.Blocked != "" {
+		return first, false
+	}
 
 	// A driver for a different model is not an automatic choice even when it is
 	// the only one. CUPS returning it means the strings overlapped, not that it

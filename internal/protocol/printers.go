@@ -41,6 +41,24 @@ type candidateView struct {
 	// next to a printer's own: when CUPS offers a driver for a Color LaserJet
 	// 4610 to somebody with a LaserJet 4, this is the field that says so.
 	DeviceID string `json:"driver_device_id,omitempty"`
+
+	// Blocked is why this driver must never be used for this printer. Listed
+	// anyway: hiding it means somebody looks for it, finds nothing, and
+	// concludes their printer was not noticed.
+	Blocked string `json:"blocked,omitempty"`
+}
+
+// firmwareView says a printer needs firmware before it can print at all.
+//
+// Kept apart from a driver needing a proprietary plugin, and the two must not be
+// run together in the interface, because one is a wait and the other is a wall.
+// Firmware is a file this machine can fetch given a network. A proprietary
+// plugin is an x86 binary that will never run on an ARM board however long
+// anybody waits.
+type firmwareView struct {
+	Needed bool   `json:"needed"`
+	File   string `json:"file,omitempty"`
+	Model  string `json:"model,omitempty"`
 }
 
 type driverCandidatesParams struct {
@@ -75,7 +93,15 @@ func (c *conn) printersDriverCandidates(ctx context.Context, params json.RawMess
 	if err != nil {
 		return nil, c.translateIPP(err, subjectPrinter)
 	}
-	return map[string]any{"candidates": candidates}, nil
+
+	// A property of the printer rather than of any driver, so it sits beside
+	// the list instead of inside it.
+	view := firmwareView{}
+	if fw, needed := driver.NeedsFirmware(p.DeviceID); needed {
+		view = firmwareView{Needed: true, File: fw.File, Model: fw.Model}
+	}
+
+	return map[string]any{"candidates": candidates, "firmware": view}, nil
 }
 
 // driversParams asks for part of the driver catalogue.
@@ -207,6 +233,7 @@ func (c *conn) driverCandidates(ctx context.Context, deviceID string) ([]candida
 			Score:                     r.Score,
 			Why:                       r.Why,
 			DeviceID:                  r.DeviceID,
+			Blocked:                   r.Blocked,
 		})
 	}
 	return out, nil

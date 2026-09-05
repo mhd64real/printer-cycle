@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mhd64real/printer-cycle/internal/driver"
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 )
@@ -43,6 +44,10 @@ type probeResult struct {
 	Location     string `json:"location"`
 	Transport    string `json:"transport"`
 	Port         int    `json:"port"`
+
+	// NeedsFirmware, the same as on a discovered device: a printer typed in by
+	// hand deserves the same warning as one that was found.
+	NeedsFirmware bool `json:"needs_firmware,omitempty"`
 }
 
 // printersProbe works out how to reach a printer from an address somebody typed.
@@ -120,8 +125,11 @@ func (c *conn) printersProbe(ctx context.Context, params json.RawMessage) (any, 
 			}
 		}
 
+		_, result.NeedsFirmware = driver.NeedsFirmware(result.DeviceID)
+
 		c.log.Info("probed an address", "address", address,
-			"found", cand.Name, "model", result.MakeAndModel)
+			"found", cand.Name, "model", result.MakeAndModel,
+			"needs_firmware", result.NeedsFirmware)
 		return result, nil
 	}
 

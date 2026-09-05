@@ -113,6 +113,13 @@ export type IdentityLink = {
 
 export type Device = {
   /**
+   * This printer holds no firmware of its own and loads it from this machine
+   * every time it is switched on. The file cannot be shipped by any Linux
+   * distribution, so it has to be fetched separately.
+   */
+  needs_firmware?: boolean;
+
+  /**
    * Stable across a discovery run, and the right thing to key a list on.
    *
    * Discovery announces updates as well as arrivals: a printer first seen over
@@ -132,6 +139,12 @@ export type Device = {
 };
 
 export type DriverCandidate = {
+  /** Why this driver must never be used for this printer. Empty otherwise. */
+  blocked?: string;
+  /** Why it scored what it did, so a choice can be checked rather than trusted. */
+  why?: string[];
+  score?: number;
+
   ppd: string;
   make_and_model: string;
   recommended: boolean;

@@ -335,3 +335,84 @@ func TestEntriesExpire(t *testing.T) {
 		t.Errorf("asked CUPS %d times across an expiry, want 2", calls)
 	}
 }
+
+// The stage's own done-when. A LaserJet 1018 is a working printer that prints
+// nothing, reports no error, and looks broken, because it holds no firmware and
+// loads it from the host at every power-on. Nobody ships that file.
+func TestTheLaserJet1018NeedsFirmware(t *testing.T) {
+	fw, needed := driver.NeedsFirmware("MFG:Hewlett-Packard;MDL:HP LaserJet 1018;CMD:ZJS;")
+	if !needed {
+		t.Fatal("a LaserJet 1018 was not flagged as needing firmware")
+	}
+	if fw.File != "sihp1018.dl" {
+		t.Errorf("file = %q, want the name the driver package fetches", fw.File)
+	}
+}
+
+// A P1007 loads the P1005 file. That is the driver package's own mapping rather
+// than a guess at a family resemblance, and getting it wrong would send somebody
+// after a file that does not exist.
+func TestAP1007LoadsTheP1005Firmware(t *testing.T) {
+	fw, needed := driver.NeedsFirmware("MFG:HP;MDL:HP LaserJet P1007;")
+	if !needed {
+		t.Fatal("a P1007 was not flagged")
+	}
+	if fw.File != "sihpP1005.dl" {
+		t.Errorf("file = %q, want sihpP1005.dl", fw.File)
+	}
+}
+
+// The model may or may not carry its own manufacturer, and both are real.
+func TestFirmwareMatchesWithOrWithoutTheMakerInTheModel(t *testing.T) {
+	for _, id := range []string{
+		"MFG:Hewlett-Packard;MDL:HP LaserJet 1020;",
+		"MFG:HP;MDL:LaserJet 1020;",
+		"MFG:hp;MDL:hp laserjet 1020;",
+	} {
+		if _, needed := driver.NeedsFirmware(id); !needed {
+			t.Errorf("%q was not recognised as a LaserJet 1020", id)
+		}
+	}
+}
+
+// Most printers need nothing, and saying otherwise would send people looking
+// for a file their printer has never wanted.
+func TestOrdinaryPrintersNeedNoFirmware(t *testing.T) {
+	for _, id := range []string{
+		"MFG:HP;MDL:LaserJet 4;",
+		"MFG:Brother;MDL:HL-2270DW;",
+		"MFG:Epson;MDL:Stylus Photo R300;",
+		"MFG:HP;MDL:LaserJet 1018 Series;",
+		"CMD:PCL;",
+		"",
+	} {
+		if fw, needed := driver.NeedsFirmware(id); needed {
+			t.Errorf("%q was told it needs %s", id, fw.File)
+		}
+	}
+}
+
+// The two are different problems and must not be run together: firmware is a
+// file this machine can fetch, a proprietary plugin is an x86 binary that will
+// never run on an ARM board.
+func TestFirmwareAndProprietaryPluginsAreSeparate(t *testing.T) {
+	// The 1018 is both at once, which is what makes conflating them tempting:
+	// it needs firmware, and one of its two drivers needs a plugin.
+	if _, needed := driver.NeedsFirmware("MFG:Hewlett-Packard;MDL:HP LaserJet 1018;"); !needed {
+		t.Fatal("the 1018 lost its firmware flag")
+	}
+
+	best, safe := driver.Best("MFG:Hewlett-Packard;MDL:HP LaserJet 1018;", []driver.Candidate{
+		{
+			PPD:                       "hpcups",
+			DeviceID:                  "MFG:Hewlett-Packard;MDL:HP LaserJet 1018;",
+			RequiresProprietaryPlugin: true,
+		},
+	})
+	if best.PPD != "hpcups" {
+		t.Fatalf("offered %q", best.PPD)
+	}
+	if safe {
+		t.Error("a driver needing an x86 binary was called a safe choice on any machine")
+	}
+}

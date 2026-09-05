@@ -344,6 +344,21 @@ function DeviceRow({
             {subtitle ?? describeTransport(device.transport)}
             {device.make_and_model ? "" : ", model unknown"}
           </p>
+          {device.needs_firmware ? (
+            <p className="mt-1 text-sm text-muted">
+              {/*
+                Said before pairing rather than after, because this is the
+                difference between a printer that works and one that sits there
+                printing nothing while reporting no error at all. Deliberately
+                not in the same words as a driver needing a proprietary plugin:
+                that one is a wall, this one is a wait.
+              */}
+              This model keeps no firmware of its own and loads it from this
+              machine every time it is switched on. The file cannot be shipped
+              with Linux, so it has to be fetched once before the printer will
+              print anything.
+            </p>
+          ) : null}
         </div>
         <Button onClick={() => pair()} disabled={busy || choosingDriver}>
           {busy ? "Adding" : "Add"}

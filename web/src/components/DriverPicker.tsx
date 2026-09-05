@@ -142,11 +142,25 @@ export function DriverPicker({
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm">{driver.make_and_model}</p>
-                  {driver.requires_proprietary_plugin ? (
-                    <p className="text-sm text-muted">Needs a closed vendor plugin</p>
+                  {driver.blocked ? (
+                    <p className="text-sm text-muted">Not for this printer: {driver.blocked}</p>
+                  ) : driver.requires_proprietary_plugin ? (
+                    <p className="text-sm text-muted">
+                      {/*
+                        Not the same problem as missing firmware, and worth
+                        saying so: firmware is a file this machine can fetch,
+                        while this is a program that only exists for Intel and
+                        AMD processors and will not run on a Raspberry Pi at all.
+                      */}
+                      Needs a closed vendor program that only runs on Intel and AMD
+                      machines
+                    </p>
+                  ) : null}
+                  {driver.why?.length ? (
+                    <p className="truncate text-sm text-muted">{driver.why.join(", ")}</p>
                   ) : null}
                 </div>
-                <Button onClick={() => onChoose(driver)} disabled={busy}>
+                <Button onClick={() => onChoose(driver)} disabled={busy || !!driver.blocked}>
                   {driver.recommended ? "Use (recommended)" : "Use"}
                 </Button>
               </li>

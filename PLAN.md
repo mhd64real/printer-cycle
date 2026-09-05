@@ -1727,7 +1727,42 @@ rather than measured. Stage 69 is where a real printer can settle it.
   one is a wait and the other is a wall.
 - **Done when:** an HP LaserJet 1018 is flagged as needing a firmware download before pairing, in
   plain language.
-- **Status:** todo
+- **Status:** done, 2026-09-06. Verified by standing up a virtual printer that reports itself as a
+  LaserJet 1018, letting CUPS discover it over mDNS the way it would a real one, and reading the row
+  in the browser: the warning sits on the row with the Add button, before anybody presses it.
+- The flag rides on the device rather than being asked for separately, because it costs nothing: it
+  is a lookup against a short list, not a question for CUPS. Discovery and probe both carry it.
+
+**The firmware list came from the driver package, not from memory.** `/usr/sbin/getweb` names the
+files it can fetch and `/usr/share/foo2zjs/hplj10xx_gui.tcl` maps models onto them: LaserJet 1000,
+1005, 1018, 1020, P1005, P1006, P1007, P1008, P1505. Two of those load another model's file, a P1007
+taking the P1005 firmware, which is the package's own mapping rather than a guess at a family
+resemblance. On a full driver installation `/usr/lib/firmware/hp` exists and is empty, which is what
+a non-redistributable file looks like after packaging.
+
+**A wait and a wall are worded differently, deliberately.** Firmware is a file this machine can fetch
+given a network. A proprietary plugin is a program that only exists for Intel and AMD and will never
+run on a Raspberry Pi however long anybody waits. The 1018 is both at once, which is exactly what
+makes them tempting to run together.
+
+**The known-bad list is empty, and that is the finding.** The mechanism is in, so the day a bad match
+is found it is a one-line change rather than a design. What is not in are entries: every one is a
+claim that a particular driver ruins a particular printer, and there is no honest way to make that
+claim without having seen it happen. A wrong entry would take a working driver away from somebody and
+give them a reason that was never true, with nothing in the interface to contradict it. Entries need
+a reproducible report: the device id, the ppd, and what came out of the printer.
+
+### Stage 55b: One place that decides what a printer is called (ADDED 2026-09-06)
+- The LaserJet 1018 shows up as "Hewlett-Packard HP LaserJet 1018". CUPS builds make-and-model by
+  putting the manufacturer in front of a model that already carries it, and the collapse added at
+  Stage 47 only catches an exact repeat, so "HP HP LaserJet" is fixed and "Hewlett-Packard HP
+  LaserJet" is not.
+- The knowledge needed to fix it already exists in Go, in the manufacturer aliases the driver ranking
+  uses. The naming lives in TypeScript. Two half-tables in two languages is the actual problem.
+- **Done when:** a printer's name is decided in one place, and "Hewlett-Packard HP LaserJet 1018"
+  reads as "HP LaserJet 1018".
+- **Status:** todo. Not folded into Stage 55, which is about firmware: this is a naming bug that
+  happens to be visible on the same screen.
 
 ### Stage 56: Firmware fetch flow
 - Fetch at pair time, with a clear message when the box is offline. Never fail silently.
@@ -2109,3 +2144,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   and candidate lookups are cached because a filtered PPD query costs seconds against CUPS every
   time. Caught myself about to record a signal as measured when it had never fired, from misreading
   `ipptool` output that prints a device id before the name it belongs to.
+- **2026-09-06, after Stage 55:** the firmware list is sourced from the foo2zjs package rather than
+  from memory, and firmware needs are worded apart from proprietary plugins because one is a wait and
+  the other is a wall. The known-bad list ships empty on purpose. Added Stage 55b: manufacturer
+  aliases exist in Go and printer naming happens in TypeScript, which is why "Hewlett-Packard HP
+  LaserJet 1018" survives a de-stutter that was written for "HP HP LaserJet".

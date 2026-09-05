@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mhd64real/printer-cycle/internal/driver"
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 	"github.com/mhd64real/printer-cycle/internal/store"
@@ -27,6 +28,19 @@ type candidateView struct {
 	// Raspberry Pi such a driver must never be the automatic choice. Distinct
 	// from needing firmware, which is a wait rather than a wall.
 	RequiresProprietaryPlugin bool `json:"requires_proprietary_plugin"`
+
+	// Score and Why are the ranking, shown rather than hidden. CUPS matches
+	// loosely enough that a list for a LaserJet 4 contains drivers for a Color
+	// LaserJet 4610, so somebody choosing by hand needs to see which of them is
+	// actually written for their printer, and somebody trusting the automatic
+	// choice deserves to be able to check it.
+	Score int      `json:"score"`
+	Why   []string `json:"why,omitempty"`
+
+	// DeviceID is the driver's own claim about what it drives. Worth showing
+	// next to a printer's own: when CUPS offers a driver for a Color LaserJet
+	// 4610 to somebody with a LaserJet 4, this is the field that says so.
+	DeviceID string `json:"driver_device_id,omitempty"`
 }
 
 type driverCandidatesParams struct {
@@ -171,53 +185,59 @@ func (c *conn) printersDrivers(ctx context.Context, params json.RawMessage) (any
 	return map[string]any{"drivers": out, "truncated": truncated}, nil
 }
 
+// driverCandidates asks what could drive a printer, best first.
+//
+// Ranked and cached by the driver package. The cache is not an optimisation
+// somebody thought would be nice: a filtered PPD query against a real cupsd
+// with a full driver installation takes between 2.7 and 5.2 seconds, every
+// time, because CUPS does not cache it either.
 func (c *conn) driverCandidates(ctx context.Context, deviceID string) ([]candidateView, error) {
-	ppds, err := c.server.cups.PPDs(ctx, ipp.PPDFilter{DeviceID: deviceID})
+	ranked, err := c.server.drivers.Candidates(ctx, deviceID)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]candidateView, 0, len(ppds))
-	for _, p := range ppds {
-		lower := strings.ToLower(p.MakeAndModel)
+	out := make([]candidateView, 0, len(ranked))
+	for _, r := range ranked {
 		out = append(out, candidateView{
-			PPD:                       p.Name,
-			MakeAndModel:              p.MakeAndModel,
-			Recommended:               strings.Contains(lower, "(recommended)"),
-			RequiresProprietaryPlugin: strings.Contains(lower, "proprietary plugin"),
+			PPD:                       r.PPD,
+			MakeAndModel:              r.MakeAndModel,
+			Recommended:               r.Recommended,
+			RequiresProprietaryPlugin: r.RequiresProprietaryPlugin,
+			Score:                     r.Score,
+			Why:                       r.Why,
+			DeviceID:                  r.DeviceID,
 		})
 	}
 	return out, nil
 }
 
-// chooseDriver picks the driver to use when the caller did not name one.
-//
-// Interim, and deliberately simple: prefer a driver CUPS marks recommended,
-// never choose one needing a closed vendor binary while an open alternative
-// exists, and otherwise take the first. Stage 54 replaces this with a real
-// ranking.
-func chooseDriver(candidates []candidateView) (string, bool) {
-	var fallback string
-	for _, c := range candidates {
-		if c.RequiresProprietaryPlugin {
-			continue
-		}
-		if c.Recommended {
-			return c.PPD, true
-		}
-		if fallback == "" {
-			fallback = c.PPD
-		}
+// lookupPPDs is the driver package's window onto CUPS.
+func (s *Server) lookupPPDs(ctx context.Context, deviceID string) ([]driver.Candidate, error) {
+	if s.cups == nil {
+		return nil, errors.New("protocol: no printing system")
 	}
-	if fallback != "" {
-		return fallback, true
+	ppds, err := s.cups.PPDs(ctx, ipp.PPDFilter{DeviceID: deviceID})
+	if err != nil {
+		return nil, err
 	}
-	// Everything left needs a proprietary plugin. Better to offer it than to
-	// pretend the printer is unsupported, but it is not chosen silently.
-	if len(candidates) > 0 {
-		return candidates[0].PPD, false
+
+	out := make([]driver.Candidate, 0, len(ppds))
+	for _, p := range ppds {
+		// The two hints CUPS gives, both of them inside the model string
+		// because there is nowhere else for them to be. Found by measurement at
+		// Stage 15, against a design session that had concluded CUPS offers no
+		// ranking signal at all.
+		lower := strings.ToLower(p.MakeAndModel)
+		out = append(out, driver.Candidate{
+			PPD:                       p.Name,
+			MakeAndModel:              p.MakeAndModel,
+			DeviceID:                  p.DeviceID,
+			Recommended:               strings.Contains(lower, "(recommended)"),
+			RequiresProprietaryPlugin: strings.Contains(lower, "proprietary plugin"),
+		})
 	}
-	return "", false
+	return out, nil
 }
 
 type addPrinterParams struct {
@@ -267,17 +287,24 @@ func (c *conn) printersAdd(ctx context.Context, params json.RawMessage) (any, er
 	case p.PPD != nil:
 		ppd = *p.PPD
 	case p.DeviceID != "":
-		candidates, err := c.driverCandidates(ctx, p.DeviceID)
+		chosen, safe, err := c.server.drivers.Best(ctx, p.DeviceID)
 		if err != nil {
 			return nil, c.translateIPP(err, subjectPrinter)
 		}
-		chosen, clean := chooseDriver(candidates)
-		if chosen == "" {
+		if chosen.PPD == "" {
 			return nil, jsonrpc.Errorf(jsonrpc.CodeDriverRequired,
 				"no driver claims this printer, so one has to be chosen by hand")
 		}
-		ppd = chosen
-		autoChosen = clean
+		if !safe {
+			// Offered, not applied. Either it needs a closed vendor binary that
+			// will not run here, or it is written for a different model and
+			// CUPS matched on a substring. Both are worth naming; neither is
+			// worth applying behind somebody's back.
+			return nil, jsonrpc.Errorf(jsonrpc.CodeDriverRequired,
+				"no driver is certain enough for this printer, so one has to be chosen by hand")
+		}
+		ppd = chosen.PPD
+		autoChosen = true
 	case canDeriveDriver(p.DeviceURI):
 		// A driverless IPP printer needs no driver, so a device that says
 		// nothing about itself is not an error: CUPS is told to ask it.

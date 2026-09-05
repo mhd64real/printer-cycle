@@ -25,6 +25,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/mhd64real/printer-cycle/internal/connauth"
+	"github.com/mhd64real/printer-cycle/internal/driver"
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
 	"github.com/mhd64real/printer-cycle/internal/store"
@@ -59,6 +60,10 @@ type Server struct {
 	db   *store.DB
 	cups *ipp.Client
 	log  *slog.Logger
+
+	// drivers ranks and caches what could drive a printer. The cache matters:
+	// a filtered PPD query costs seconds against a real cupsd, every time.
+	drivers *driver.Finder
 
 	// streamIdle is how long a document stream may go untouched. Zero means the
 	// default; tests set it short so abandonment can be observed.
@@ -99,7 +104,7 @@ func NewServer(db *store.DB, opts Options) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{
+	s := &Server{
 		db:         db,
 		cups:       opts.CUPS,
 		streamIdle: opts.StreamIdle,
@@ -107,6 +112,8 @@ func NewServer(db *store.DB, opts Options) *Server {
 		log:        log,
 		conns:      make(map[*conn]struct{}),
 	}
+	s.drivers = driver.New(s.lookupPPDs)
+	return s
 }
 
 // Start begins the background work a server does regardless of who is

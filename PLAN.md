@@ -1689,7 +1689,35 @@ Brother's, and dropping the rest would mean parsing the string twice.
   candidate lookups need caching keyed by device id, invalidated when driver packages change.
 - **Done when:** a device with several candidates gets a deterministic, sensible first choice, the
   LaserJet 1018 picks foo2zjs over hpcups, and a repeat lookup is instant.
-- **Status:** todo
+- **Status:** done, 2026-09-05. The 1018 picks foo2zjs at 170 against hpcups at 120, and a repeat
+  lookup went from 3.66s to 0.02s against the live stack.
+- **The ranking is a table.** Five signals with weights in one place, so what beats what can be read
+  rather than traced through a function. Two comparisons are actually being asserted: an exact model
+  match beats everything, and given the same model an open driver beats one needing a closed vendor
+  binary. The rest are tie-breakers.
+- **Every choice carries its reasons.** `why` comes back with each candidate, so an automatic choice
+  can be checked rather than merely trusted, and somebody picking by hand can see which driver is
+  actually written for their printer.
+- **Not safe is offered, not applied.** A driver for a different model, or one needing a plugin that
+  cannot run here, is named rather than used, and the add falls through to the manual picker from
+  Stage 48b instead of silently doing the wrong thing.
+
+**The caching is not a nicety.** Measured against the live stack: a filtered PPD query costs between
+2.7 and 5.2 seconds and costs that every time, because CUPS does not cache it either. Three identical
+queries in a row took 2.68s, 3.69s and 3.67s. Ten minutes rather than a day, because the only thing
+the cache can be wrong about is a driver installed while an entry is held.
+
+**CUPS matched a driver whose declared command set disagrees with the printer's.** The LaserJet 1018
+reports `CMD:ZJS`; the foo2zjs PPD it matched declares `CMD:ACL`, and the hpcups one declares none at
+all and spells the model in lower case. CUPS matches on manufacturer and model and does not care.
+
+**And I nearly wrote that down as a measurement.** The command-set signal was described in a comment
+as "measured on the LaserJet 1018, where it is the difference between the two candidates". It is not:
+it fires for neither of them. The mistake came from reading `ipptool` output, which prints the device
+id before the name within each record, so a line-ordered reading pairs every id with the next
+record's name. Dumping the decoded groups showed CUPS itself pairing them the other way. The signal
+is kept, at a weight that breaks ties and nothing else, and its comment now says it is unproven
+rather than measured. Stage 69 is where a real printer can settle it.
 
 ### Stage 55: Overrides and firmware flags
 - The known-bad match list, and the flag for models needing non-redistributable firmware.
@@ -1794,6 +1822,9 @@ Brother's, and dropping the rest would mean parsing the string twice.
 - **Status:** blocked
 
 ### Stage 69: A real USB printer, paired automatically
+- **Also settle the command-set signal from Stage 54.** It ranks a driver higher for declaring a page
+  description language the printer claims, and it has never fired on real data: the one real pair in
+  hand disagrees on command set and CUPS matched anyway. Confirm it against hardware or remove it.
 - **Done when:** a physical printer is discovered, auto-matched to a driver, and prints in one click.
 - **Status:** blocked
 
@@ -2074,3 +2105,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   than from the specification, and 13,109 of them are committed as a fixture so the sweep tests every
   real shape rather than the ones an author thought of. Found a typo in Debian's own driver packaging
   and left it uncorrected on purpose.
+- **2026-09-05, after Stage 54:** driver ranking became a weighted table with its reasons reported,
+  and candidate lookups are cached because a filtered PPD query costs seconds against CUPS every
+  time. Caught myself about to record a signal as measured when it had never fired, from misreading
+  `ipptool` output that prints a device id before the name it belongs to.

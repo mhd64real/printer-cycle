@@ -60,6 +60,7 @@ var methodScopes = map[string]string{
 	"users.authenticate": store.ScopeUsersAuthenticate,
 	"users.signOut":      scopeNone,
 	"users.create":       store.ScopeUsersManage,
+	"users.remove":       store.ScopeUsersManage,
 	"users.whoami":       scopeNone,
 
 	// A connector reading its own settings needs no permission: it is asking

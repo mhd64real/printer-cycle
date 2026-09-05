@@ -421,6 +421,8 @@ func (c *conn) Handle(ctx context.Context, method string, params json.RawMessage
 		return c.usersSignOut(ctx, params)
 	case "users.whoami":
 		return c.usersWhoami(ctx, params)
+	case "users.remove":
+		return c.usersRemove(ctx, params)
 	case "users.create":
 		return c.usersCreate(ctx, params)
 	}

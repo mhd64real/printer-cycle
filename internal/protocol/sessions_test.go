@@ -2,6 +2,8 @@ package protocol_test
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
@@ -192,4 +194,74 @@ func containsCredentialWords(s string) bool {
 		}
 	}
 	return false
+}
+
+// Removing an account is an administrator's decision, proven by their session.
+// A connector holding users.manage is not a person and cannot be one.
+func TestOnlyAnAdministratorRemovesAnAccount(t *testing.T) {
+	url, db := testServer(t)
+	for _, name := range []string{"mohamed", "sara"} {
+		if _, err := db.CreateUser(ctx(), name, "", "hunter2hunter2"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c := authedClient(t, url, db, "dashboard", store.KnownScopes())
+	admin := signIn(t, c, "mohamed", "hunter2hunter2")
+	ordinary := signIn(t, c, "sara", "hunter2hunter2")
+
+	sara, err := db.UserByUsername(ctx(), "sara")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mohamed, err := db.UserByUsername(ctx(), "mohamed")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The scope alone is not enough: no session, no removal.
+	if resp := c.call("users.remove", map[string]any{"user_id": sara.ID}); resp.Error == nil {
+		t.Error("an account was removed with no session")
+	}
+
+	// Nor is being signed in as somebody ordinary.
+	if resp := c.call("users.remove", map[string]any{
+		"user_id": mohamed.ID, "session": ordinary,
+	}); resp.Error == nil {
+		t.Error("a non-administrator removed an account")
+	}
+
+	if resp := c.call("users.remove", map[string]any{
+		"user_id": sara.ID, "session": admin,
+	}); resp.Error != nil {
+		t.Fatalf("an administrator could not remove an account: %v", resp.Error)
+	}
+
+	if _, err := db.UserByUsername(ctx(), "sara"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("the account is still there: %v", err)
+	}
+}
+
+// The last administrator cannot be removed, or nobody could manage the box.
+func TestTheLastAdministratorStays(t *testing.T) {
+	url, db := testServer(t)
+	if _, err := db.CreateUser(ctx(), "mohamed", "", "hunter2hunter2"); err != nil {
+		t.Fatal(err)
+	}
+
+	c := authedClient(t, url, db, "dashboard", store.KnownScopes())
+	admin := signIn(t, c, "mohamed", "hunter2hunter2")
+
+	mohamed, err := db.UserByUsername(ctx(), "mohamed")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := c.call("users.remove", map[string]any{"user_id": mohamed.ID, "session": admin})
+	if resp.Error == nil {
+		t.Fatal("the only administrator removed themselves")
+	}
+	if !strings.Contains(resp.Error.Message, "administrator") {
+		t.Errorf("refused with %q, which does not explain why", resp.Error.Message)
+	}
 }

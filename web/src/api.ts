@@ -274,6 +274,17 @@ export const api = {
 
   revokeLink: (id: string) => call<{ revoked: string }>("identity.revoke", { id }),
 
+  users: () => call<{ users: User[] }>("users.list", {}),
+
+  createUser: (username: string, displayName: string, password: string) =>
+    call<{ id: string }>("users.create", {
+      username,
+      display_name: displayName,
+      password,
+    }),
+
+  removeUser: (id: string) => call<{ removed: string }>("users.remove", { user_id: id }),
+
   jobs: (limit = 50) => call<{ jobs: Job[] }>("jobs.list", { limit }),
 
   cancelJob: (jobId: string) =>

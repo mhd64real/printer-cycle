@@ -321,3 +321,51 @@ func (c *conn) usersCreate(ctx context.Context, params json.RawMessage) (any, er
 // towards writing the result down. Length is the property that helps, and this
 // is a household print server rather than a bank.
 const minPasswordLength = 10
+
+type removeUserParams struct {
+	UserID  string `json:"user_id"`
+	Session string `json:"session"`
+}
+
+// usersRemove deletes an account.
+//
+// An administrator's decision, proven by their session rather than by the
+// connector holding a scope: a connector cannot be told who anybody is, so it
+// cannot be the thing that decides an account should go.
+//
+// Removing yourself is allowed. Somebody leaving a household should not have to
+// find another administrator to be let out, and the store already refuses to
+// remove the last administrator, which is the case that would actually lock
+// everybody out.
+func (c *conn) usersRemove(ctx context.Context, params json.RawMessage) (any, error) {
+	var p removeUserParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "params are not an object")
+	}
+	if strings.TrimSpace(p.UserID) == "" {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "no user id given")
+	}
+
+	actor, err := c.userFromSession(ctx, p.Session)
+	if err != nil {
+		return nil, err
+	}
+	if !actor.IsAdmin {
+		return nil, jsonrpc.Errorf(jsonrpc.CodeScopeDenied,
+			"only an administrator can remove an account")
+	}
+
+	err = c.db.DeleteUser(ctx, p.UserID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams, "no such account")
+	case errors.Is(err, store.ErrLastAdmin):
+		return nil, jsonrpc.Errorf(jsonrpc.CodeInvalidParams,
+			"this is the only administrator, so removing it would leave nobody able to manage the box")
+	case err != nil:
+		return nil, err
+	}
+
+	c.log.Info("account removed", "user", p.UserID, "by", actor.Username)
+	return map[string]any{"removed": p.UserID}, nil
+}

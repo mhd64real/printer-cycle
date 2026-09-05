@@ -601,6 +601,19 @@ back out to phones. Same word, opposite directions. Keep them distinct in copy a
 Password hashes never appear in any response. Not because argon2id hashes are directly usable, but
 because there is no reason for one to leave the process that stores it.
 
+**users.create** adds an account and **users.remove** deletes one. Both require `users.manage` and,
+separately, an administrator's `session`: a connector cannot be told who anybody is, so it cannot be
+the thing that decides an account should exist or stop existing. The one exception is the first
+account on a box that has none, because there is nobody to ask.
+
+```json
+{"jsonrpc":"2.0","id":21,"method":"users.remove","params":{"user_id":"user_01K7...","session":"9f3a..."}}
+```
+
+Removing yourself is allowed: somebody leaving a household should not have to find another
+administrator to be let out. **The last administrator cannot be removed**, which is the case that
+would otherwise leave nobody able to manage the box.
+
 ---
 
 ## 8. Identity linking (PROPOSED)

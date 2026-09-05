@@ -1619,7 +1619,22 @@ what made "enrolling does not enable anything" true in the first place.
 ### Stage 52: Users page, hidden until needed
 - Invisible while there is one user, appears when a second is added.
 - **Done when:** a single-user install never sees user management, and a two-user install does.
-- **Status:** todo
+- **Status:** done, 2026-09-05. Verified in both directions: a one-person box has no People tab,
+  adding a second brings it into existence, and removing them again takes it away.
+- **The one action that has to survive the page being hidden is adding somebody**, or the second
+  state is unreachable. It sits quietly in the header while there is nobody to manage, and moves onto
+  the page once there is. One form, one way in at a time.
+- Going back to one person leaves whoever did it looking at a tab that has just stopped existing, so
+  the view falls back rather than showing nothing.
+- Added `users.remove`, which the scope table had named as "create, edit, remove users" since the
+  spec was written and which nothing implemented. Removing is an administrator's decision proven by
+  their session, not by a connector holding a scope: a connector cannot be told who anybody is, so it
+  cannot be the thing that decides an account should stop existing.
+- Removing yourself is allowed. Somebody leaving a household should not have to find another
+  administrator to be let out, and the store already refuses to remove the last administrator, which
+  is the case that would actually lock everybody out. The page does not offer it on your own row,
+  because a button that signs you out permanently sitting above everybody else's is a misclick
+  waiting to happen and there is nowhere here to ask "are you sure" that would not be worse.
 
 ---
 
@@ -2023,3 +2038,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   scope alone, which any chat connector holds. Unexpected errors are logged before being flattened to
   "internal error", which found the next two bugs by itself: a connector could not be switched on
   before enrolling, and enrolling forced the switch back off.
+- **2026-09-05, after Stage 52:** added `users.remove`, named in the scope table since the spec was
+  written and never implemented. User management appears only when there is somebody to manage, which
+  means the one action that creates that state has to live outside it.

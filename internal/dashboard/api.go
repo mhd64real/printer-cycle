@@ -62,6 +62,7 @@ var browserMethods = map[string]bool{
 
 	"users.list":   true,
 	"users.create": true,
+	"users.remove": true,
 }
 
 // methodsNeedingSession are relayed with the signed-in person attached, because
@@ -69,6 +70,7 @@ var browserMethods = map[string]bool{
 var methodsNeedingSession = map[string]bool{
 	"jobs.list":        true,
 	"jobs.cancel":      true,
+	"users.remove":     true,
 	"identity.approve": true,
 	"identity.links":   true,
 	"identity.revoke":  true,

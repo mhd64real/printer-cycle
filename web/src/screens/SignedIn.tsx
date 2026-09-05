@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/Button";
 import { Connectors } from "@/screens/Connectors";
 import { Jobs } from "@/screens/Jobs";
 import { Links } from "@/screens/Links";
+import { AddSomeone, People } from "@/screens/People";
 import { Print } from "@/screens/Print";
 import { Printers } from "@/screens/Printers";
 import { api, type User } from "@/api";
@@ -14,12 +15,46 @@ const TABS = [
   { key: "printers", label: "Printers" },
   { key: "connectors", label: "Connectors" },
   { key: "links", label: "Linked accounts" },
+  { key: "people", label: "People" },
 ] as const;
 
 type Tab = (typeof TABS)[number]["key"];
 
 export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   const [tab, setTab] = useState<Tab>("print");
+  const [users, setUsers] = useState<User[] | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const loadUsers = useCallback(async () => {
+    try {
+      const { users } = await api.users();
+      setUsers(users ?? []);
+    } catch {
+      // Not knowing how many people there are is not worth an error on screen:
+      // it decides whether one tab is shown, and printing carries on either way.
+      setUsers([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
+
+  /**
+   * User management appears when there is somebody to manage.
+   *
+   * A household of one has nothing to manage: no roles to assign, no list worth
+   * reading, and a page showing a single row with your own name on it is a page
+   * that makes somebody wonder what they missed. So it is not there. Adding a
+   * second person is what brings it into existence, which is why that one
+   * action lives in the header until it does.
+   */
+  const manyPeople = (users?.length ?? 0) > 1;
+  const tabs = TABS.filter((entry) => entry.key !== "people" || manyPeople);
+
+  // Guards against being left looking at a tab that has just stopped existing,
+  // which happens the moment a two-person box goes back to one.
+  const current = tabs.some((entry) => entry.key === tab) ? tab : "print";
 
   async function signOut() {
     await api.signOut().catch(() => undefined);
@@ -35,6 +70,11 @@ export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => voi
             {user.display_name || user.username}
             {user.is_admin ? " (administrator)" : ""}
           </span>
+          {!manyPeople && user.is_admin ? (
+            <Button variant="plain" onClick={() => setAdding(true)}>
+              Add someone
+            </Button>
+          ) : null}
           <Button variant="plain" onClick={signOut}>
             Sign out
           </Button>
@@ -42,14 +82,14 @@ export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => voi
       </header>
 
       <nav className="mt-4 flex gap-1 border-b border-line">
-        {TABS.map((entry) => (
+        {tabs.map((entry) => (
           <button
             key={entry.key}
             type="button"
             onClick={() => setTab(entry.key)}
-            aria-current={tab === entry.key ? "page" : undefined}
+            aria-current={current === entry.key ? "page" : undefined}
             className={
-              tab === entry.key
+              current === entry.key
                 ? "-mb-px border-b-2 border-accent px-3 py-2 text-sm font-medium text-ink"
                 : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-muted hover:text-ink"
             }
@@ -59,17 +99,32 @@ export function SignedIn({ user, onSignOut }: { user: User; onSignOut: () => voi
         ))}
       </nav>
 
+      {adding ? (
+        <div className="mt-6">
+          <AddSomeone
+            onAdded={() => {
+              setAdding(false);
+              void loadUsers();
+              setTab("people");
+            }}
+            onCancel={() => setAdding(false)}
+          />
+        </div>
+      ) : null}
+
       <main className="mt-8">
-        {tab === "print" ? (
+        {current === "print" ? (
           <Print />
-        ) : tab === "jobs" ? (
+        ) : current === "jobs" ? (
           <Jobs />
-        ) : tab === "printers" ? (
+        ) : current === "printers" ? (
           <Printers />
-        ) : tab === "connectors" ? (
+        ) : current === "connectors" ? (
           <Connectors />
-        ) : (
+        ) : current === "links" ? (
           <Links />
+        ) : (
+          <People users={users ?? []} me={user} onChanged={loadUsers} />
         )}
       </main>
     </div>

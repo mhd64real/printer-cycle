@@ -17,8 +17,10 @@ Stage status is one of `todo`, `doing`, `done`, `cut`, `blocked`.
   quarantined in Phase 9 rather than blocking anything.
 - **The repo is public from the first commit.** Every stage must leave `main` in a state that is not
   embarrassing to a stranger. README says honestly what works and what does not, from day one.
-- **Launch is the full version:** README and releases, a compatibility list, a demo video, and launch
-  posts. No landing page: removed 2026-09-06, the repo page is the front door.
+- **Launch is the repo itself.** A README that says honestly what works, a compatibility list,
+  screenshots, and a tagged release with verified binaries. No landing page, no demo video, no launch
+  posts: all removed 2026-09-06. Whether to market this, and when, is a separate decision from
+  whether it is built.
 
 ## Frozen decisions (from the design session, see PROTOCOL.md)
 
@@ -2195,7 +2197,11 @@ device id is shown on the Printers page, which it is not.
 
 ---
 
-# Phase 11: Launch
+# Phase 11: Release
+
+Publishing the thing, not promoting it. The demo video and launch posts that once lived here were
+removed on 2026-09-06: whether and how to market printer-cycle is a decision for later and not one
+this plan should make on Mohamed's behalf.
 
 ### Stage 75: v0.1.0 release
 - Tagged, with binaries for all three architectures and checksums.
@@ -2241,27 +2247,21 @@ device id is shown on the Printers page, which it is not.
   as carelessness.
 - `make check` clean, 262 tests pass, integration suite green.
 
-### Stage 78: Demo video
-- A printer nobody could use, working in under ninety seconds.
-- The dashboard is a web page, so it can be filmed on a phone. That is not AirPrint and must not be
-  filmed as though it were: printer-cycle ships no connector, and implying otherwise would be the
-  first thing somebody felt lied to about.
-- **Status:** todo
-
-### Stage 79: Launch posts
-- Show HN, r/selfhosted, r/raspberry_pi. Written honestly, limitations included.
-- **Status:** todo
-
-### Stage 80: Post-launch triage
-- Answer issues, log what people actually own, feed real device IDs back into the ranking table.
-- **Status:** todo
-
 ---
 
 # Revision log
 
 Every change to this plan gets a line here, so the reasoning survives.
 
+- **2026-09-06:** Stages 78, 79 and 80 (demo video, launch posts, post-launch triage) deleted at
+  Mohamed's request, which ends Phase 11 and the plan at Stage 76. Building the thing and promoting
+  it are separate decisions, and only the first was ever this plan's job.
+  Stage 80 was carrying one piece of engineering rather than promotion: feeding real device ids back
+  into the ranking table. That was already Stage 69's to settle, where it belongs, so nothing is lost
+  with it. The unproven command-set signal in `internal/driver/rank.go` stays labelled unproven until
+  hardware settles it.
+  **What remains of this plan is Phase 9 alone**, four stages blocked on a printer and a Linux box.
+  Everything else is done.
 - **2026-09-06:** Stage 77 (landing page) deleted at Mohamed's request. A separate site would be a
   second copy of the pitch to keep true, and the README already carries it: screenshots, the
   one-liner, and the limitations. The repo page is the front door, so Stage 79's posts link there.

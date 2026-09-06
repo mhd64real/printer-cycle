@@ -206,6 +206,10 @@ function ByAddress({ onAdded, searching }: { onAdded: () => void; searching: boo
       if (looksLikeURI) {
         const uri = address.trim();
         setFound({
+          // A pasted uri describes no hardware, so the uri is the only truthful
+          // name for it. If a driver is chosen for it, that driver's model
+          // replaces this.
+          name: uri,
           device_uri: uri,
           device_id: "",
           make_and_model: "",
@@ -306,7 +310,7 @@ function DeviceRow({
   const [firmwareDone, setFirmwareDone] = useState(!!device.firmware_installed);
   const [firmwareError, setFirmwareError] = useState<string | null>(null);
 
-  const name = displayName(device);
+  const name = device.name;
 
   async function getFirmware() {
     setFetching(true);
@@ -336,7 +340,7 @@ function DeviceRow({
         name: device.make_and_model
           ? name
           : driver
-            ? printerNameFor(driver.make_and_model)
+            ? (driver.name ?? driver.make_and_model)
             : name,
         deviceId: device.device_id,
         ...(driver ? { ppd: driver.ppd } : {}),
@@ -434,89 +438,10 @@ function DeviceRow({
   );
 }
 
-/**
- * Words that name a page description language rather than a printer.
- *
- * Only stripped from the end of a name, where they are the driver talking. A
- * printer genuinely called "PostScript something" keeps it.
- */
-const DRIVER_WORDS = new Set([
-  "pcl",
-  "pcl3",
-  "pcl5",
-  "pcl5c",
-  "pcl5e",
-  "pcl6",
-  "ps",
-  "postscript",
-  "pxlmono",
-  "pxlcolor",
-  "hpijs",
-  "hpcups",
-  "cups",
-  "pdf",
-  "raster",
-]);
-
-/**
- * The name to give a printer whose driver was chosen by hand.
- *
- * A driver is named for the machine it drives plus a great deal about itself:
- * "HP LaserJet 4100 MFP v.3010.107 Postscript (recommended)", "Epson Stylus C20
- * - CUPS+Gutenprint v5.3.4", "Brother DCP-1200 Foomatic/hl1250". The printer is
- * in there, in front, and the rest is the catalogue talking.
- *
- * A heuristic, checked against the real catalogue rather than invented: every
- * shape handled here came out of a live CUPS installation. It only ever runs on
- * a printer that could not say what it is, so the alternative it is competing
- * with is a queue named after a device uri.
- */
-export function printerNameFor(makeAndModel: string): string {
-  let name = makeAndModel.replace(/\([^)]*\)/g, " ");
-
-  // Everything from the first of these onwards is about the driver.
-  for (const cut of [" - ", ", ", " Foomatic/"]) {
-    const at = name.indexOf(cut);
-    if (at > 0) name = name.slice(0, at);
-  }
-
-  // A version, and whatever trails it.
-  const version = name.search(/\sv\.?\d/i);
-  if (version > 0) name = name.slice(0, version);
-
-  const words = name.trim().replace(/\s+/g, " ").split(" ");
-  while (words.length > 1 && DRIVER_WORDS.has(words[words.length - 1]!.toLowerCase())) {
-    words.pop();
-  }
-  return words.join(" ") || makeAndModel;
-}
-
 /** Whether two announcements describe one printer. */
 function sameDevice(a: Device, b: Device): boolean {
   if (a.identity && b.identity) return a.identity === b.identity;
   return a.device_uri === b.device_uri;
-}
-
-/**
- * The name to show for a printer, without the manufacturer said twice.
- *
- * CUPS builds make-and-model by putting the manufacturer in front of the model,
- * and most printers already put it in the model themselves, so the raw string
- * comes back as "HP HP LaserJet 4000" or "Brother Brother HL-2270DW". Vendor
- * software tends to just print that. Showing it that way here would undercut
- * the whole point of this project, and the string also becomes the default
- * queue name, so the stutter would follow the printer around.
- *
- * Only a leading repeat is collapsed. A model that genuinely repeats a word
- * later on keeps it.
- */
-export function displayName(device: Device): string {
-  const raw = (device.make_and_model || device.info || device.device_uri).trim();
-  const [first, second, ...rest] = raw.split(/\s+/);
-  if (first && second && first.toLowerCase() === second.toLowerCase()) {
-    return [second, ...rest].join(" ");
-  }
-  return raw;
 }
 
 /** Says how a printer is attached, in words rather than a URI scheme. */

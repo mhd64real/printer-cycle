@@ -46,6 +46,11 @@ type candidateView struct {
 	// anyway: hiding it means somebody looks for it, finds nothing, and
 	// concludes their printer was not noticed.
 	Blocked string `json:"blocked,omitempty"`
+
+	// Name is what a printer driven by this driver should be called, with the
+	// catalogue's own vocabulary stripped off. Decided here rather than by the
+	// page, so that one place decides what a printer is called.
+	Name string `json:"name,omitempty"`
 }
 
 // firmwareView says a printer needs firmware before it can print at all.
@@ -244,6 +249,7 @@ func (c *conn) driverCandidates(ctx context.Context, deviceID string) ([]candida
 			Why:                       r.Why,
 			DeviceID:                  r.DeviceID,
 			Blocked:                   r.Blocked,
+			Name:                      driver.PrinterName(r.MakeAndModel),
 		})
 	}
 	return out, nil

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mhd64real/printer-cycle/internal/deviceid"
 	"github.com/mhd64real/printer-cycle/internal/driver"
 	"github.com/mhd64real/printer-cycle/internal/ipp"
 	"github.com/mhd64real/printer-cycle/internal/jsonrpc"
@@ -49,6 +50,15 @@ type deviceView struct {
 	Location     string `json:"location"`
 	Transport    string `json:"transport"`
 
+	// Name is what this printer should be called on screen, decided here.
+	//
+	// It used to be worked out by the page, from make_and_model, which CUPS
+	// builds by putting the manufacturer in front of a model that usually
+	// carries it already. The page could collapse "HP HP LaserJet 1018" and not
+	// "Hewlett-Packard HP LaserJet 1018", because knowing those are one company
+	// needs a table that lived in Go while the naming lived in TypeScript.
+	Name string `json:"name"`
+
 	// NeedsFirmware marks a printer that loads its firmware from this machine
 	// at every power-on, from a file no distribution may ship. Carried on the
 	// device rather than fetched separately because it costs nothing: it is a
@@ -69,6 +79,7 @@ func (c *conn) viewOf(d ipp.Device) deviceView {
 	fw, needsFirmware := driver.NeedsFirmware(d.ID)
 	installed := needsFirmware && c.server.firmware.Installed(fw.File)
 	return deviceView{
+		Name:              deviceid.PrinterName(d.ID, d.MakeAndModel, d.Info, d.URI),
 		NeedsFirmware:     needsFirmware,
 		FirmwareInstalled: installed,
 		DeviceURI:         d.URI,

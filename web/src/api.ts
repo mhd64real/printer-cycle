@@ -122,6 +122,15 @@ export type IdentityLink = {
 
 export type Device = {
   /**
+   * What this printer should be called, decided by core.
+   *
+   * Not worked out here. CUPS builds its make-and-model by putting the
+   * manufacturer in front of a model that usually carries it already, and
+   * knowing that "Hewlett-Packard" and "HP" are one company needs a table that
+   * belongs next to the rest of what core knows about hardware.
+   */
+  name: string;
+  /**
    * This printer holds no firmware of its own and loads it from this machine
    * every time it is switched on. The file cannot be shipped by any Linux
    * distribution, so it has to be fetched separately.
@@ -150,6 +159,11 @@ export type Device = {
 };
 
 export type DriverCandidate = {
+  /**
+   * What a printer driven by this should be called, with the catalogue's own
+   * vocabulary stripped off. Decided by core, so one place decides names.
+   */
+  name?: string;
   /** Why this driver must never be used for this printer. Empty otherwise. */
   blocked?: string;
   /** Why it scored what it did, so a choice can be checked rather than trusted. */

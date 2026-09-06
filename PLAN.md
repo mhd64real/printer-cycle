@@ -1761,8 +1761,21 @@ a reproducible report: the device id, the ppd, and what came out of the printer.
   uses. The naming lives in TypeScript. Two half-tables in two languages is the actual problem.
 - **Done when:** a printer's name is decided in one place, and "Hewlett-Packard HP LaserJet 1018"
   reads as "HP LaserJet 1018".
-- **Status:** todo. Not folded into Stage 55, which is about firmware: this is a naming bug that
-  happens to be visible on the same screen.
+- **Status:** done, 2026-09-06. It reads "HP LaserJet 1018" on the discovery screen, and no naming
+  code is left in TypeScript at all.
+- **Built from the device id rather than from make-and-model.** CUPS makes that string by putting the
+  manufacturer in front of the model, and most printers already put it in the model themselves, so it
+  arrives doubled. The device id keeps the two apart, which is the whole reason to prefer it, and
+  collapsing a repeated word was only ever a way of coping without it.
+- The concatenated string is still the fallback for a device with no usable id, then the printer's own
+  description, then the address. Something has to be shown, and an address is at least true.
+- Driver names moved too. Picking a driver by hand names the printer after the model it drives, with
+  the catalogue's vocabulary stripped off, and that heuristic is now in Go beside the rest.
+
+**The fix was moving a decision, not writing more of it.** The interface could collapse "HP HP
+LaserJet" and not "Hewlett-Packard HP LaserJet", because knowing those are one company needs a table
+of manufacturer aliases, and that table lived in Go while the naming lived in TypeScript. Two half
+answers in two languages, and neither could be completed without duplicating the other.
 
 ### Stage 56: Firmware fetch flow
 - Fetch at pair time, with a clear message when the box is offline. Never fail silently.
@@ -2407,3 +2420,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   written from the specification alone while building this. What stays is what an outsider needs to
   write their own. Stage 78 was reworded, because a demo filmed on a phone must not imply an AirPrint
   connector that does not exist.
+- **2026-09-06, after Stage 55b:** naming is decided in one place, in Go, from the parsed device id.
+  The bug was not the collapsing rule but where it lived: the manufacturer aliases were in one
+  language and the naming in another, so neither half could be finished without copying the other.

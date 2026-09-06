@@ -186,3 +186,105 @@ func (id ID) String() string {
 	write(KeyCommands, strings.Join(id.Commands, ","))
 	return b.String()
 }
+
+// makerAliases folds the names one company uses for itself onto one.
+//
+// Only pairs seen in the driver catalogue or reported by real hardware. A
+// longer list would be guessing at companies that may not print anything.
+var makerAliases = map[string]string{
+	"hewlettpackard":        "hp",
+	"eastmankodakcompany":   "kodak",
+	"lexmarkinternational":  "lexmark",
+	"seikoepson":            "epson",
+	"brotherindustries":     "brother",
+	"canoninc":              "canon",
+	"ricohcompanyltd":       "ricoh",
+	"oki":                   "okidata",
+	"samsungelectronics":    "samsung",
+	"xeroxcorporation":      "xerox",
+	"fujixerox":             "fujixerox",
+	"konicaminoltabusiness": "konicaminolta",
+}
+
+// foldMaker reduces a manufacturer name to something comparable: letters and
+// digits only, lower case, with the long forms mapped onto the short.
+func foldMaker(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	folded := b.String()
+	if alias, ok := makerAliases[folded]; ok {
+		return alias
+	}
+	return folded
+}
+
+// SameManufacturer reports whether two names are the same company.
+func SameManufacturer(a, b string) bool {
+	a, b = foldMaker(a), foldMaker(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+}
+
+// PrinterName is what a printer should be called on screen.
+//
+// One function, in one language, because the alternative was two half-tables in
+// two: the manufacturer aliases lived in Go and the naming lived in TypeScript,
+// so "HP HP LaserJet 1018" was collapsed and "Hewlett-Packard HP LaserJet 1018"
+// was not.
+//
+// Built from the device id rather than from CUPS's make-and-model. CUPS makes
+// that string by putting the manufacturer in front of the model, and most
+// printers already put it in the model themselves, so it arrives doubled. The
+// device id keeps the two apart, which is the whole reason to prefer it.
+//
+// Falls back through make-and-model, the printer's own description, and finally
+// the device uri, because something has to be shown and a uri is at least true.
+func PrinterName(deviceID, makeAndModel, info, uri string) string {
+	if id := Parse(deviceID); id.Model != "" {
+		return joinMakerAndModel(id.Manufacturer, id.Model)
+	}
+
+	// No usable device id. The best that can be done with a string somebody
+	// else concatenated is to notice when a word was repeated outright.
+	if name := collapseRepeat(makeAndModel); name != "" {
+		return name
+	}
+	if info = strings.TrimSpace(info); info != "" {
+		return info
+	}
+	return strings.TrimSpace(uri)
+}
+
+// joinMakerAndModel puts a manufacturer in front of a model, unless the model
+// already names it.
+//
+// "Hewlett-Packard" and a model of "HP LaserJet 1018" is one printer named
+// twice, and folding the two makes that visible where a string comparison does
+// not.
+func joinMakerAndModel(maker, model string) string {
+	maker, model = strings.TrimSpace(maker), strings.TrimSpace(model)
+	if maker == "" {
+		return model
+	}
+
+	if first, _, _ := strings.Cut(model, " "); SameManufacturer(maker, first) {
+		return model
+	}
+	return maker + " " + model
+}
+
+// collapseRepeat drops a leading word repeated immediately, which is what CUPS
+// produces for a printer whose model already carries its manufacturer.
+func collapseRepeat(s string) string {
+	fields := strings.Fields(s)
+	if len(fields) > 1 && strings.EqualFold(fields[0], fields[1]) {
+		return strings.Join(fields[1:], " ")
+	}
+	return strings.Join(fields, " ")
+}

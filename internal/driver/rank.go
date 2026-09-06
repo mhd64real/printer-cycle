@@ -8,6 +8,7 @@
 package driver
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/mhd64real/printer-cycle/internal/deviceid"
@@ -202,42 +203,56 @@ func Best(printerDeviceID string, candidates []Candidate) (Candidate, bool) {
 // catalogue, sometimes for the same printer: the LaserJet 1018 reports
 // Hewlett-Packard while a great many HP PPDs say HP.
 func sameManufacturer(a, b string) bool {
-	a, b = normaliseMaker(a), normaliseMaker(b)
-	if a == "" || b == "" {
-		return false
-	}
-	return a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+	return deviceid.SameManufacturer(a, b)
 }
 
-// makerAliases folds the names one company uses for itself onto one.
+// driverLanguages are words that name a page description language rather than a
+// printer. Stripped only from the end of a name, where they are the driver
+// talking about itself.
+var driverLanguages = map[string]bool{
+	"pcl": true, "pcl3": true, "pcl5": true, "pcl5c": true, "pcl5e": true,
+	"pcl6": true, "ps": true, "postscript": true, "pxlmono": true,
+	"pxlcolor": true, "hpijs": true, "hpcups": true, "cups": true,
+	"pdf": true, "raster": true,
+}
+
+// PrinterName turns a driver's own name into a name for the printer it drives.
 //
-// Only pairs seen in the catalogue. A longer list would be guessing at
-// companies that may not print anything.
-var makerAliases = map[string]string{
-	"hewlettpackard":        "hp",
-	"eastmankodakcompany":   "kodak",
-	"lexmarkinternational":  "lexmark",
-	"seikoepson":            "epson",
-	"brotherindustries":     "brother",
-	"canoninc":              "canon",
-	"ricohcompanyltd":       "ricoh",
-	"oki":                   "okidata",
-	"samsungelectronics":    "samsung",
-	"xeroxcorporation":      "xerox",
-	"fujixerox":             "fujixerox",
-	"konicaminoltabusiness": "konicaminolta",
-}
+// A driver is named for the machine plus a great deal about itself: "HP LaserJet
+// 4100 MFP v.3010.107 Postscript (recommended)", "Epson Stylus C20 -
+// CUPS+Gutenprint v5.3.4", "Brother DCP-1200 Foomatic/hl1250". The printer is in
+// there, in front, and the rest is the catalogue talking.
+//
+// Used when somebody picks a driver by hand for a printer that could not say
+// what it is, so the alternative it competes with is a queue named after a
+// device uri. A heuristic, checked against real catalogue entries rather than
+// imagined ones.
+func PrinterName(makeAndModel string) string {
+	name := parentheses.ReplaceAllString(makeAndModel, " ")
 
-func normaliseMaker(name string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(name) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
+	// Everything from the first of these onwards is about the driver.
+	for _, cut := range []string{" - ", ", ", " Foomatic/"} {
+		if at := strings.Index(name, cut); at > 0 {
+			name = name[:at]
 		}
 	}
-	folded := b.String()
-	if alias, ok := makerAliases[folded]; ok {
-		return alias
+
+	// A version, and whatever trails it.
+	if at := version.FindStringIndex(name); at != nil && at[0] > 0 {
+		name = name[:at[0]]
 	}
-	return folded
+
+	words := strings.Fields(name)
+	for len(words) > 1 && driverLanguages[strings.ToLower(words[len(words)-1])] {
+		words = words[:len(words)-1]
+	}
+	if len(words) == 0 {
+		return strings.TrimSpace(makeAndModel)
+	}
+	return strings.Join(words, " ")
 }
+
+var (
+	parentheses = regexp.MustCompile(`\([^)]*\)`)
+	version     = regexp.MustCompile(`(?i)\sv\.?\d`)
+)

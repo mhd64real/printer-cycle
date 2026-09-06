@@ -16,11 +16,15 @@ package ipp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/user"
+	"strings"
 	"sync/atomic"
 
 	"github.com/OpenPrinting/goipp"
@@ -201,9 +205,105 @@ func (c *Client) send(ctx context.Context, path string, req *goipp.Message, body
 	if err != nil {
 		return nil, fmt.Errorf("ipp: sending request: %w", err)
 	}
+
+	// CUPS asks who is calling, and over a local socket it can be told.
+	//
+	// Administrative operations are behind "Require user @SYSTEM", so cupsd
+	// answers the first attempt with 401 and a list of schemes it will accept.
+	// On a Unix domain socket one of those is PeerCred: the client names
+	// itself and cupsd checks that name against the credentials of the process
+	// on the other end of the socket, which cannot be lied about. No password
+	// exists anywhere, which is the point.
+	//
+	// This is what lpadmin does, and not doing it is why core could talk to
+	// CUPS perfectly well until it tried to add a printer on a real machine.
+	// The development environment allows administration unauthenticated, so
+	// every test passed.
+	if resp.StatusCode == http.StatusUnauthorized && c.peerCredentials() {
+		challenge := resp.Header.Get("WWW-Authenticate")
+		resp.Body.Close()
+
+		if !strings.Contains(challenge, "PeerCred") {
+			return nil, fmt.Errorf("ipp: CUPS wants authentication this cannot provide: %s",
+				challenge)
+		}
+
+		retry, err := c.retryWithPeerCred(ctx, u, req, body)
+		if err != nil {
+			return nil, err
+		}
+		resp = retry
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		return nil, fmt.Errorf("ipp: server returned HTTP %s", resp.Status)
 	}
 	return resp, nil
+}
+
+// peerCredentials reports whether this connection can prove who it is without a
+// password. Only a Unix domain socket can: over TCP there is nothing for cupsd
+// to check a claimed name against.
+func (c *Client) peerCredentials() bool { return c.local }
+
+// retryWithPeerCred sends the request again, naming the user this process runs
+// as.
+//
+// The body is rebuilt rather than reused: an io.Reader handed to the first
+// attempt has already been consumed. Callers that stream a document therefore
+// cannot be retried, which is correct rather than a limitation. Printing is not
+// an administrative operation and is never challenged.
+func (c *Client) retryWithPeerCred(ctx context.Context, u url.URL, req *goipp.Message, body io.Reader) (*http.Response, error) {
+	if body != nil {
+		return nil, errors.New("ipp: CUPS asked for authentication part way through a document")
+	}
+
+	name, err := currentUser()
+	if err != nil {
+		return nil, err
+	}
+
+	var head bytes.Buffer
+	if err := req.Encode(&head); err != nil {
+		return nil, fmt.Errorf("ipp: encoding request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), &head)
+	if err != nil {
+		return nil, fmt.Errorf("ipp: building request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", contentType)
+	httpReq.Header.Set("Authorization", "PeerCred "+name)
+
+	c.requests.Add(1)
+	resp, err := c.httpc.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("ipp: sending request: %w", err)
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		resp.Body.Close()
+		return nil, fmt.Errorf("ipp: CUPS refused %s as an administrator. "+
+			"That account has to be in the group named by SystemGroup in cups-files.conf", name)
+	}
+	return resp, nil
+}
+
+// currentUser is the account this process runs as.
+//
+// os/user is asked first and the environment is the fallback, because a static
+// binary without cgo cannot read /etc/passwd through libc and os/user's pure Go
+// path can still fail on a system using anything other than files.
+func currentUser() (string, error) {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username, nil
+	}
+	if name := os.Getenv("USER"); name != "" {
+		return name, nil
+	}
+	if name := os.Getenv("LOGNAME"); name != "" {
+		return name, nil
+	}
+	return "", errors.New("ipp: cannot tell which user this process runs as, " +
+		"so CUPS cannot be told who is asking")
 }

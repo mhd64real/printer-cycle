@@ -1888,7 +1888,40 @@ looks configured and does nothing is how somebody spends an afternoon.
   user, silently, so a core outside that group shows every job with no name and no owner.
 - **Done when:** core can perform a CUPS admin operation with no password anywhere, and job listings
   come back with names and owners rather than blanks.
-- **Status:** todo
+- **Status:** done, 2026-09-06. In a bare Debian container: `printers.add` created a queue, and the
+  job that followed listed as `name: "t.pdf"` with a real owner. No password exists anywhere on the
+  machine.
+
+**Core could not administer CUPS at all, and every test passed.** Administrative operations sit
+behind `Require user @SYSTEM`, so cupsd answers the first attempt with 401 and a list of schemes it
+will accept. Over a Unix socket one of those is **PeerCred**: the client names itself and cupsd
+checks that name against the credentials of the process at the other end of the socket, which cannot
+be lied about. `lpadmin` does this. Core did not, so on a real machine adding a printer failed with
+"ipp: server returned HTTP 401 Unauthorized".
+
+**The development environment hid it completely.** Its cupsd allows administration unauthenticated,
+so every integration test since Stage 34 has been exercising a code path that could not work on any
+real install. This is the second time the dev environment has been the thing that was wrong.
+
+**The group membership is still necessary, and still for both reasons.** It is what makes the name
+core presents acceptable to `@SYSTEM`, and it is what stops CUPS blanking `job-name` and
+`job-originating-user-name` under `JobPrivateValues`. The job listing above proves the second: the
+name came back.
+
+**Found by CUPS's own log**, at `LogLevel debug2`, which says exactly what it did:
+`Authorized as printer-cycle using PeerCred`. Guessing at the mechanism from the 401 alone would have
+taken far longer, and the first two guesses, group membership and the certificate file in
+`/run/cups/certs`, were both wrong. That file is `root:root 0440` and the service account cannot read
+it.
+
+**`ca-certificates` and `curl` are now core packages.** A bare `debian:trixie-slim` has neither, and
+neither does a minimal server install. Without curl the installer cannot download its own binaries.
+Without ca-certificates the firmware fetch from Stage 56 fails with a certificate error, because Go's
+HTTP client uses the system certificate pool and there is no pool.
+
+**Binaries are never installed unverified.** Downloads are checked against a `SHA256SUMS` published
+beside them, and a mismatch stops everything before anything is written. `--from` installs from a
+directory without checking, for a build or an air-gapped machine, and says so when it does.
 
 ### Stage 60: Service units
 - systemd, plus OpenRC for Alpine.
@@ -2248,3 +2281,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   driver metapackage carries every driver as a Recommends, so installing it the correct way installs
   nothing and leaves a working cupsd with 43 drivers. Found by counting them rather than by trusting
   the exit code.
+- **2026-09-06, after Stage 59:** core has never been able to administer a real CUPS. Administrative
+  operations need the PeerCred scheme over the Unix socket, which lpadmin uses and core did not, and
+  the development environment allows administration unauthenticated so nothing ever failed. Added
+  `ca-certificates` and `curl` to the core packages, both absent from a bare Debian and both needed:
+  one by the installer, one by core's own firmware fetch.

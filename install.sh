@@ -122,6 +122,14 @@ detect_manager() {
 # packages_core is the printing system itself, and the two pieces of name
 # resolution without which a printer is found and then cannot be reached.
 #
+# ca-certificates and curl are here for a reason that is easy to miss. A bare
+# debian:trixie-slim has neither, and neither does a minimal server install,
+# which a Raspberry Pi usually is. Without curl this script cannot download its
+# own binaries. Without ca-certificates, core cannot fetch printer firmware
+# either: Go's HTTP client uses the system certificate pool, so an https mirror
+# fails with a certificate error on a machine that has no certificates. Checked,
+# not assumed.
+#
 # nss-mdns is not optional anywhere it exists. Avahi lets CUPS discover a
 # printer over mDNS; resolving the .local name that comes back is a separate
 # thing, done by the name service switch. Without it discovery works, pairing
@@ -133,11 +141,11 @@ detect_manager() {
 # than assumed. See limitations().
 packages_core() {
 	case "$1" in
-	debian) echo "cups cups-client avahi-daemon libnss-mdns" ;;
-	rhel) echo "cups cups-client avahi nss-mdns" ;;
-	arch) echo "cups avahi nss-mdns" ;;
-	alpine) echo "cups cups-client avahi" ;;
-	suse) echo "cups cups-client avahi nss-mdns" ;;
+	debian) echo "cups cups-client avahi-daemon libnss-mdns ca-certificates curl" ;;
+	rhel) echo "cups cups-client avahi nss-mdns ca-certificates curl" ;;
+	arch) echo "cups avahi nss-mdns ca-certificates curl" ;;
+	alpine) echo "cups cups-client avahi ca-certificates curl" ;;
+	suse) echo "cups cups-client avahi nss-mdns ca-certificates curl" ;;
 	esac
 }
 
@@ -329,6 +337,178 @@ configure_mdns() {
 	say "mDNS name resolution configured in $conf"
 }
 
+# ---------------------------------------------------------------------------
+# The account, the directories, and the binaries
+# ---------------------------------------------------------------------------
+
+# SERVICE_USER is who core and the dashboard run as.
+#
+# Its own account rather than root. Core talks to a socket on the network and
+# hands documents to a filter chain, and neither of those needs the ability to
+# do anything else on the machine.
+SERVICE_USER=printer-cycle
+CONFIG_DIR=/etc/printer-cycle
+DATA_DIR=/var/lib/printer-cycle
+BIN_DIR=/usr/local/bin
+
+# cups_admin_group is the group CUPS treats as its administrators.
+#
+# Read from CUPS rather than assumed, because it is configuration and it
+# differs: cups-files.conf names it in SystemGroup, and distributions disagree
+# about whether that is lpadmin, sys, or wheel.
+cups_admin_group() {
+	group=$(sed -n 's/^SystemGroup[[:space:]]*//p' /etc/cups/cups-files.conf 2>/dev/null |
+		head -1 | tr ' ' '\n' | grep -v '^root$' | head -1)
+	[ -n "$group" ] || group=lpadmin
+	echo "$group"
+}
+
+# create_user makes the service account and puts it in the CUPS admin group.
+#
+# The group membership is needed for two separate things, and the second is not
+# obvious. Administrative operations need it, which is expected. But CUPS also
+# blanks job-name and job-originating-user-name for any client it does not treat
+# as an owner or a system user, silently, under JobPrivateValues. A core outside
+# that group therefore lists every job with no name and no owner, and nothing
+# anywhere reports an error. That cost a stage to find.
+create_user() {
+	admin_group=$(cups_admin_group)
+
+	if id "$SERVICE_USER" >/dev/null 2>&1; then
+		say "the $SERVICE_USER account already exists"
+	elif command -v useradd >/dev/null 2>&1; then
+		useradd --system --home-dir "$DATA_DIR" --no-create-home \
+			--shell /usr/sbin/nologin "$SERVICE_USER"
+	elif command -v adduser >/dev/null 2>&1; then
+		# busybox adduser, on Alpine. Different flags, same account.
+		adduser -S -D -H -h "$DATA_DIR" -s /sbin/nologin "$SERVICE_USER"
+	else
+		die "no useradd or adduser on this machine, so the $SERVICE_USER account cannot be created"
+	fi
+
+	if ! getent group "$admin_group" >/dev/null 2>&1; then
+		warn "there is no $admin_group group, so core may not be able to administer CUPS"
+		return 0
+	fi
+
+	if id -nG "$SERVICE_USER" 2>/dev/null | tr ' ' '\n' | grep -qx "$admin_group"; then
+		say "$SERVICE_USER is already in $admin_group"
+		return 0
+	fi
+
+	if command -v usermod >/dev/null 2>&1; then
+		usermod -aG "$admin_group" "$SERVICE_USER"
+	elif command -v addgroup >/dev/null 2>&1; then
+		addgroup "$SERVICE_USER" "$admin_group"
+	else
+		die "cannot add $SERVICE_USER to $admin_group: no usermod or addgroup"
+	fi
+	say "$SERVICE_USER added to $admin_group"
+}
+
+# create_directories makes the two places printer-cycle keeps things.
+#
+# The data directory holds the database, which holds password hashes, session
+# tokens and connector public keys, so it is readable by nobody else. The
+# config directory is owned by root and merely readable by the service, because
+# a service that can rewrite its own configuration is a service that can grant
+# itself things.
+create_directories() {
+	mkdir -p "$CONFIG_DIR" "$DATA_DIR"
+
+	chown root:root "$CONFIG_DIR"
+	chmod 0755 "$CONFIG_DIR"
+
+	chown "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR" 2>/dev/null ||
+		chown "$SERVICE_USER" "$DATA_DIR"
+	chmod 0700 "$DATA_DIR"
+
+	say "$CONFIG_DIR and $DATA_DIR ready"
+}
+
+# checksum prints the sha256 of a file, using whatever this machine has.
+checksum() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | cut -d' ' -f1
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | cut -d' ' -f1
+	elif command -v openssl >/dev/null 2>&1; then
+		openssl dgst -sha256 "$1" | sed 's/.*= //'
+	else
+		die "no sha256sum, shasum or openssl on this machine, so downloads cannot be verified. printer-cycle will not install unverified binaries."
+	fi
+}
+
+# fetch downloads a URL to a path.
+fetch() {
+	url=$1
+	dest=$2
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL --retry 2 -o "$dest" "$url"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -q -O "$dest" "$url"
+	else
+		die "no curl or wget on this machine, so nothing can be downloaded"
+	fi
+}
+
+# install_binaries puts core and the dashboard on the machine.
+#
+# Two ways in. --from takes them from a directory, which is what a build has and
+# what an air-gapped install needs. Otherwise they are downloaded and checked
+# against a SHA256SUMS file published beside them.
+#
+# An unverified binary is never installed. Not because a mirror is likely to be
+# hostile, but because "it downloaded something and ran it as a system service"
+# is not a sentence anybody should have to read about their own machine.
+install_binaries() {
+	work=$(mktemp -d)
+	trap 'rm -rf "$work"' EXIT
+
+	for binary in printer-cycle-core printer-cycle-dashboard; do
+		name="$binary-linux-$arch"
+
+		if [ -n "$FROM_DIR" ]; then
+			[ -f "$FROM_DIR/$name" ] || die "$FROM_DIR/$name is not there"
+			cp "$FROM_DIR/$name" "$work/$name"
+		else
+			url="$RELEASE_URL/$name"
+			say "downloading $name"
+			fetch "$url" "$work/$name" || die "could not download $url"
+		fi
+	done
+
+	if [ -n "$FROM_DIR" ]; then
+		say "installing binaries from $FROM_DIR without checking them, as asked"
+	else
+		say "verifying"
+		fetch "$RELEASE_URL/SHA256SUMS" "$work/SHA256SUMS" ||
+			die "could not download $RELEASE_URL/SHA256SUMS, and printer-cycle will not install binaries it cannot check"
+
+		for binary in printer-cycle-core printer-cycle-dashboard; do
+			name="$binary-linux-$arch"
+			want=$(grep "  $name\$" "$work/SHA256SUMS" 2>/dev/null | cut -d' ' -f1 | head -1)
+			[ -n "$want" ] ||
+				die "SHA256SUMS does not mention $name, so it cannot be checked"
+
+			got=$(checksum "$work/$name")
+			if [ "$got" != "$want" ]; then
+				die "$name does not match its checksum. Expected $want, got $got. Nothing has been installed."
+			fi
+		done
+		say "checksums match"
+	fi
+
+	for binary in printer-cycle-core printer-cycle-dashboard; do
+		name="$binary-linux-$arch"
+		install -m 0755 -o root -g root "$work/$name" "$BIN_DIR/$binary"
+	done
+
+	rm -rf "$work"
+	trap - EXIT
+	say "installed $BIN_DIR/printer-cycle-core and $BIN_DIR/printer-cycle-dashboard"
+}
+
 do_install() {
 	require_root
 
@@ -365,6 +545,10 @@ do_install() {
 	fi
 
 	configure_mdns "$family"
+
+	create_user
+	create_directories
+	install_binaries
 
 	say "done"
 }
@@ -406,14 +590,20 @@ usage() {
 	cat >&2 <<EOF
 $VERSION_LINE
 
-  sh install.sh              install the printing system and every driver
+  sh install.sh              install the printing system, every driver, and printer-cycle
   sh install.sh --minimal    install without the driver set
+  sh install.sh --from DIR   install binaries from a directory rather than downloading
   sh install.sh --detect     report what this machine is, and change nothing
 
 EOF
 }
 
 MINIMAL=no
+FROM_DIR=""
+
+# RELEASE_URL is where the binaries come from. Overridable so an install can be
+# pointed at a mirror, and so this can be tested without publishing anything.
+RELEASE_URL=${PRINTER_CYCLE_RELEASE_URL:-https://github.com/mhd64real/printer-cycle/releases/latest/download}
 
 main() {
 	action=install
@@ -421,6 +611,11 @@ main() {
 		case "$1" in
 		--detect) action=detect ;;
 		--minimal) MINIMAL=yes ;;
+		--from)
+			shift
+			[ $# -gt 0 ] || die "--from needs a directory"
+			FROM_DIR=$1
+			;;
 		-h | --help)
 			usage
 			return 0

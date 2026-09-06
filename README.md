@@ -6,13 +6,17 @@ A print server for old printers, and for printers whose software is worse than t
 
 ## Status
 
-**Not working yet. There is nothing to install.**
+**It works. There is no release yet.**
 
-This repository currently holds the design and the build plan, and almost no code. It is public from
-the first commit because building in the open is more useful than a surprise launch, not because it
-is ready.
+Discovery, pairing, printing, live job status, users, connectors and the installer are all built and
+tested. What is missing is a tagged release with published binaries, and any use on real hardware:
+every printer this has ever driven has been a virtual one, and every install has been a container.
+That gap is the reason there is no version number.
 
-Progress is tracked stage by stage in [PLAN.md](PLAN.md).
+If you want to run it today, build it and install from the build. See [Installing](#installing).
+
+Progress is tracked stage by stage in [PLAN.md](PLAN.md), including everything that turned out to be
+wrong along the way.
 
 ## What it is
 
@@ -28,6 +32,50 @@ back on the network in a form modern devices already understand.
 **Your printer works, but its software is miserable.** The vendor app wants an account, a cloud
 service, and a large download in order to print one page. printer-cycle gives you a clean dashboard
 running on your own hardware instead, with no account, and nothing leaving your network.
+
+## What it looks like
+
+Everything on this network, found and offered in one click. printer-cycle installs every driver up
+front, so there is no list of eighteen thousand to search through, and it says plainly when a printer
+needs something it cannot supply:
+
+![The printers page, showing two discovered printers](docs/screenshots/printers.png)
+
+Print from the browser. Options are three-state, so an untouched setting is not sent at all and a
+printer configured for double-sided stays that way:
+
+![The print page](docs/screenshots/print.png)
+
+Job status arrives as it happens, pushed rather than polled:
+
+![The jobs page](docs/screenshots/jobs.png)
+
+## Installing
+
+There is no release yet, so the one-liner below has nothing to download. It is what will work from
+v0.1.0:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mhd64real/printer-cycle/main/install.sh | sudo sh
+```
+
+Today, build it and install from the build:
+
+```sh
+git clone https://github.com/mhd64real/printer-cycle
+cd printer-cycle
+make build-all
+sudo sh install.sh --from dist
+```
+
+Either way the installer works out what your machine is, installs CUPS and every driver it can, adds
+a service account, and sets both binaries to start on boot. Then open `http://<the machine>:6311`.
+
+`--minimal` skips the driver set. `--detect` reports what would happen and changes nothing.
+`--uninstall` removes it again, leaving CUPS and your printers alone.
+
+Tested on Debian, Fedora, Arch, Alpine and openSUSE, with the whole install, reinstall and uninstall
+cycle run in a container for each, under both systemd and OpenRC.
 
 ## How it works
 
@@ -54,14 +102,24 @@ dependency-free Node, and then read [docs/writing-a-connector.md](docs/writing-a
 It is built to run on a Raspberry Pi Zero 2 W with 512MB of RAM, which means it will run comfortably
 on whatever you already have.
 
-## What it is not
+## What it is not, and what it cannot do
 
 - **It does not scan.** Scanning is a separate stack entirely and it is out of scope. Not "not yet".
   Out of scope.
 - **It is not a cloud service.** No account, no server of ours, nothing phoning home.
-- **It cannot revive every printer.** Some models only ever had closed source x86 drivers, and those
-  will never run on an ARM board. They do work if you run printer-cycle on an old x86 machine
-  instead. A compatibility list will exist before the first release.
+- **Some printers only ever had closed source x86 drivers.** Those will never run on an ARM board,
+  however long you wait. printer-cycle says so rather than failing quietly, and it will pick an open
+  driver over a proprietary one whenever there is a choice. Such printers do work if you run
+  printer-cycle on an old x86 machine instead.
+- **A few printers hold no firmware of their own** and load it from the host every time they are
+  switched on, from a file no distribution is allowed to ship. printer-cycle recognises them, says so
+  before you pair, and can fetch the file once given a network. Until it does, the printer prints
+  nothing and reports no error, which is exactly how those printers look broken when they are not.
+- **On Alpine, only printers that need no driver will work.** Alpine packages no printer drivers at
+  all, and cannot resolve `.local` names because that needs a glibc component musl does not have. The
+  installer says both, out loud, before it starts.
+- **It has never met a real printer.** Everything has been verified against virtual printers and
+  containers. That is enough to find a great many bugs, and it is not the same as working.
 
 ## Development
 

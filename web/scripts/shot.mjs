@@ -30,7 +30,14 @@ const browser = await puppeteer.launch({
 
 try {
   const page = await browser.newPage();
-  await page.setViewport({ width: 1000, height: 820, deviceScaleFactor: 2 });
+  // Height matters for screenshots meant to be looked at: fullPage still
+  // captures the whole viewport, so a short page in a tall window is mostly
+  // empty. SHOT_HEIGHT trims it to what the content needs.
+  await page.setViewport({
+    width: Number(process.env.SHOT_WIDTH ?? 1000),
+    height: Number(process.env.SHOT_HEIGHT ?? 820),
+    deviceScaleFactor: 2,
+  });
 
   await page.goto(url, { waitUntil: "networkidle2" });
 

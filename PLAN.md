@@ -2099,7 +2099,32 @@ here is the consequence" is better than a guide that quietly describes something
 
 ### Stage 71: README rewrite
 - The real pitch, screenshots, install one-liner, honest limitations including the x86 driver wall.
-- **Status:** todo
+- **Status:** done, 2026-09-06.
+
+**The old Status block was false and had been for weeks.** It said "Not working yet. There is nothing
+to install" and "almost no code", written when both were true and left alone while discovery,
+pairing, printing, live job status, users, connectors and the installer were all built. A public
+repository that understates itself is still a repository saying something untrue about itself.
+
+It now says what is actually the case: it works, there is no release, and **it has never met a real
+printer**. Every printer this has driven has been virtual and every install has been a container.
+That is enough to have found a great many bugs and it is not the same as working, so it is in the
+Status block rather than buried at the bottom.
+
+**The install section says which command works today.** The one-liner is written out and marked as
+what will work from v0.1.0, because there is no release for it to download; building and installing
+with `--from dist` is what works now. Publishing a command that cannot succeed would have been the
+first thing anybody tried.
+
+**The limitations section carries what the work actually found**, rather than one line about x86:
+printers whose drivers are x86-only, printers that load firmware from the host and look broken until
+they get it, and Alpine having no drivers and no way to resolve `.local` names at all.
+
+**Screenshots are of the real thing**, taken by driving a browser against a running stack: discovery
+offering a LaserJet 1018 with its firmware warning, the print page, and job status.
+
+**Every claim in it was checked** rather than written from memory: the flags exist as described, the
+dashboard does listen on 6311, and the raw URL in the one-liner really does serve install.sh.
 
 ### Stage 72: Compatibility list
 - What works, what needs firmware, what will never work on ARM and why.
@@ -2423,3 +2448,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-09-06, after Stage 55b:** naming is decided in one place, in Go, from the parsed device id.
   The bug was not the collapsing rule but where it lived: the manufacturer aliases were in one
   language and the naming in another, so neither half could be finished without copying the other.
+- **2026-09-06, after Stage 71:** the README said the project did not work, which stopped being true
+  a long way back. Corrected, along with an install section that distinguishes the command that works
+  today from the one that will work after a release, and a limitations section carrying what the
+  build actually found rather than what was guessed at the start.

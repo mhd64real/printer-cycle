@@ -1804,10 +1804,45 @@ than saying "download failed", so the day that mirror disappears the message say
 - Detect the family and map package names for apt, dnf, pacman, apk, and zypper. Detect arm64,
   armv7, amd64.
 - **Done when:** it reports correctly inside five distro containers.
-- **Status:** todo
+- **Status:** done, 2026-09-06. All five detect, and `make check-install` re-runs the whole thing:
+  one container per family, asking each distribution's own package manager whether every name in the
+  list exists.
+- POSIX sh, not bash. A Raspberry Pi minimal image and an Alpine container both lack it, and the one
+  thing an installer must not do is fail before it can explain itself.
+- `ID_LIKE` is what makes this work on distributions nobody here has heard of. Raspberry Pi OS says
+  `ID=raspbian ID_LIKE=debian` and Pop!_OS says `ID=pop ID_LIKE="ubuntu debian"`, and both are apt
+  machines without being named anywhere.
+- `armv6l` is accepted as well as `armv7l`, because that is what a Pi Zero and a Pi 1 report and Go's
+  linux/arm build runs on both.
+
+**Two package names were wrong, and checking found them.** `foomatic-db` and `foomatic-db-engine`
+were written from memory into the Alpine list and do not exist there. That is the entire argument for
+`make check-install`.
+
+**Alpine has no printer drivers at all.** Not in main, not in community: no foomatic-db, no
+gutenprint, no hplip, no PPD collection of any kind. `cups` and `cups-filters` are the whole of its
+printing stack. Checked twice, with community explicitly enabled, because it did not seem possible.
+
+**Alpine also cannot resolve `.local` names, permanently.** `nss-mdns` is a glibc name service switch
+module and Alpine is musl, which has no such mechanism, so the failure found at Stage 46 is not a
+missing package there but a fact about the system.
+
+So Alpine gets printer-cycle with both said out loud at install time: only printers needing no driver
+will print, which is IPP Everywhere and so most hardware since about 2015, and adding one may need
+its address rather than its name. Neither is something an installer can fix, and a promise of "every
+driver, automatically" that quietly does not hold on one distribution is worse than a distribution
+that says what it is.
+
+**Arch needed the seccomp sandbox disabled to check at all** under emulation on an ARM host: pacman
+drops to a sandbox user whose seccomp filter fails there, and the symptom is every package appearing
+to be missing. Written down in docs/packages.md so the next person does not read
+`error: package 'cups' was not found` as a real answer.
 
 ### Stage 58: Install CUPS and every driver
 - Driver-only split packages, never the full vendor suites.
+- **Alpine cannot have the driver set**, found at Stage 57: it packages no drivers at all. The
+  installer must not pretend otherwise, and its warnings are already written. "Every driver" is a
+  Debian, Fedora, Arch and openSUSE promise.
 - **`libnss-mdns` is required, found at Stage 46.** Avahi lets CUPS *discover* a printer over mDNS;
   *resolving* the `.local` hostname that comes back is a separate thing done by the name service
   switch. Without it, discovery works, pairing gets as far as CUPS trying to reach the printer, and
@@ -2180,3 +2215,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   them, because "could not install firmware" is not something anybody can act on. Added
   `--firmware-mirror` and `--firmware-dir`, since the driver package now fetches from a third-party
   mirror and the manufacturer's own copies are gone.
+- **2026-09-06, after Stage 57:** install.sh detects five distribution families and every package
+  name it names was checked against that distribution's own repository, which found two that do not
+  exist. Alpine turns out to package no printer drivers and no mDNS name resolution at all, so it is
+  given printer-cycle with both limits stated at install time rather than a promise that does not
+  hold there.

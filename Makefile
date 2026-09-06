@@ -12,7 +12,7 @@ LDFLAGS := -s -w -X $(MODULE)/internal/version.Version=$(VERSION)
 BINARIES  := core dashboard
 PLATFORMS := linux/arm64 linux/amd64 linux/arm
 
-.PHONY: all build build-all check vet fmt test test-integration measure clean web web-install dev-up dev-down dev-logs dev-shell dev-printers
+.PHONY: all build build-all check vet fmt test test-integration measure clean web web-install dev-up dev-down dev-logs dev-shell dev-printers check-install
 
 all: build
 
@@ -104,3 +104,10 @@ dev-logs:
 
 dev-shell:
 	docker exec -it printer-cycle-cups bash
+
+# Checks install.sh against one container per distribution family, and every
+# package name it produces against that distribution's own repository.
+#
+# Not part of `check`: it pulls five images and talks to five package mirrors.
+check-install:
+	@sh scripts/check-install.sh

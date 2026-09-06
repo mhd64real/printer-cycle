@@ -17,8 +17,8 @@ Stage status is one of `todo`, `doing`, `done`, `cut`, `blocked`.
   quarantined in Phase 9 rather than blocking anything.
 - **The repo is public from the first commit.** Every stage must leave `main` in a state that is not
   embarrassing to a stranger. README says honestly what works and what does not, from day one.
-- **Launch is the full version:** README and releases, a compatibility list, a landing page, a demo
-  video, and launch posts.
+- **Launch is the full version:** README and releases, a compatibility list, a demo video, and launch
+  posts. No landing page: removed 2026-09-06, the repo page is the front door.
 
 ## Frozen decisions (from the design session, see PROTOCOL.md)
 
@@ -2241,10 +2241,6 @@ device id is shown on the Printers page, which it is not.
   as carelessness.
 - `make check` clean, 262 tests pass, integration suite green.
 
-### Stage 77: Landing page
-- The pitch, screenshots, install one-liner, link to the repo.
-- **Status:** todo
-
 ### Stage 78: Demo video
 - A printer nobody could use, working in under ninety seconds.
 - The dashboard is a web page, so it can be filmed on a phone. That is not AirPrint and must not be
@@ -2265,6 +2261,10 @@ device id is shown on the Printers page, which it is not.
 # Revision log
 
 Every change to this plan gets a line here, so the reasoning survives.
+
+- **2026-09-06:** Stage 77 (landing page) deleted at Mohamed's request. A separate site would be a
+  second copy of the pitch to keep true, and the README already carries it: screenshots, the
+  one-liner, and the limitations. The repo page is the front door, so Stage 79's posts link there.
 
 - **2026-08-30:** plan created. Written for a Mac-only build with Docker CUPS, a public repo from the
   first commit, and a full launch. Hardware stages quarantined in Phase 9 rather than allowed to

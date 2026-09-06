@@ -147,3 +147,6 @@ GPLv3. See [LICENSE](LICENSE).
 Connectors are separate programs communicating with core over a documented protocol, not linked
 code. Implementing that protocol places no licensing obligation on your connector. License your own
 repository however you like, including commercially.
+
+Contributions are accepted under GPLv3 with a sign-off and no contributor licence agreement, which
+means core can never be taken proprietary. See [CONTRIBUTING.md](CONTRIBUTING.md).

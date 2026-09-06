@@ -2168,7 +2168,30 @@ Debian trixie ships 2.4.10 with drivers deprecated and working.
 ### Stage 74: Contributing, and the licence decision made deliberately
 - Contribution terms, and a conscious choice about whether accepting outside code forecloses ever
   relicensing core.
-- **Status:** todo
+- **Status:** done, 2026-09-06. **GPLv3 with a Developer Certificate of Origin, and no contributor
+  licence agreement.** Mohamed's decision, taken with the consequence stated rather than assumed.
+
+**What it forecloses, deliberately.** Every contributor keeps their copyright, so core can never be
+relicensed without asking all of them. A closed source edition of printer-cycle is permanently off the
+table. That is the intended outcome and CONTRIBUTING.md says so outright rather than leaving somebody
+to work it out.
+
+**What it does not foreclose.** The "maybe a paid version" from the design interview does not need a
+proprietary core, because the architecture already separates the two: connectors are separate
+programs over a documented protocol, not linked code, so a paid connector, a hosted service or paid
+support are all possible with core staying GPLv3. A contributor agreement would only have bought the
+ability to take core itself proprietary, and asking contributors to sign that away is a poor trade
+for a project that wants their help.
+
+**The most valuable contribution is not code.** printer-cycle has never met a real printer, so a
+report from actual hardware is worth more than any patch: the device id, whether pairing chose a
+driver on its own, whether it printed. The compatibility list currently rests entirely on what the
+driver catalogue claims. The known-bad driver list ships empty for the same reason and is the one
+thing that cannot be filled in from here at all.
+
+**Two claims in the draft were wrong and were checked rather than shipped.** A curl example against
+`/api/call` would have returned "not signed in" to everybody who tried it, and a sentence said the
+device id is shown on the Printers page, which it is not.
 
 ---
 
@@ -2490,3 +2513,7 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-09-06, after Stage 73:** the architecture document explains the reasoning and ends with the
   four groups of things that were wrong. That section is the useful half: a design rationale nobody
   can check is indistinguishable from marketing.
+- **2026-09-06, after Stage 74, Mohamed's decision:** GPLv3 with a DCO and no contributor licence
+  agreement. Core can never be relicensed, which is deliberate: the paid version that might exist one
+  day does not need a proprietary core, because connectors are separate programs and can be licensed
+  however their authors like. Phase 10 finished.

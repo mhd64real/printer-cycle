@@ -1980,7 +1980,18 @@ where something later removes it gets a working print server rather than a silen
 
 ---
 
-# Phase 8: Connectors, which prove the whole design
+# Phase 8: Making connectors possible
+
+**No connector ships with printer-cycle.** Decided 2026-09-06, and it is a scope decision rather than
+a technical one: the AirPrint connector that used to be Stages 64 to 66 is gone from this plan.
+
+The design already stands without one. The dashboard is a connector with no privileged access, and
+three more were written against the specification while building this: two throwaways at Stages 50
+and 51, and the example that ships at Stage 62. That is the proof that the protocol is implementable
+by somebody outside this repository, which is what these stages existed to demonstrate.
+
+What remains here is everything an outsider needs in order to write one: an example, a guide, and the
+one piece of the dashboard that connectors depend on and nothing had ever exercised.
 
 ### Stage 62: Example connector, deliberately tiny
 - Under 150 lines, in its own directory, doing the handshake, declaring a setting, submitting a job.
@@ -2002,7 +2013,7 @@ behaviour as far as it goes, because such a connector is meant to fall back to a
 administrator chose, and no administrator has chosen one. But `connectors.setFallbackUser` exists in
 core, is on the dashboard's allowlist, and **nothing in the interface calls it**, so there is no way
 to choose. Jobs from such a connector then belong to no one and appear on nobody's jobs page. This is
-the AirPrint case exactly, so it has to be settled before Stage 64. Added as Stage 63b.
+the AirPrint case exactly, and any connector that cannot identify people has it. Added as Stage 63b.
 
 ### Stage 63b: Choosing who a connector prints as (ADDED 2026-09-06)
 - A connector declaring `identity: "none"` cannot say who anybody is, so its jobs belong to the
@@ -2044,21 +2055,6 @@ are now what core actually sends, copied from a real exchange rather than from m
 **The guide says out loud what is not finished.** An `identity: "none"` connector has no way to be
 given an owner, because nothing calls `connectors.setFallbackUser`. Writing "this is not built yet,
 here is the consequence" is better than a guide that quietly describes something that does not work.
-
-### Stage 64: AirPrint connector, IPP server side
-- Its own IPP endpoint that accepts jobs from phones and forwards them to core.
-- **Done when:** a raw IPP client can print through it.
-- **Status:** todo
-
-### Stage 65: AirPrint connector, mDNS advertisement
-- Advertise `_ipp._tcp` with the attributes iOS requires.
-- **Done when:** an iPhone on the LAN lists the printer.
-- **Status:** todo
-
-### Stage 66: AirPrint end to end
-- Phone to connector to core to CUPS to output file.
-- **Done when:** printing from an iPhone produces the expected output.
-- **Status:** todo
 
 ---
 
@@ -2122,7 +2118,10 @@ here is the consequence" is better than a guide that quietly describes something
 - **Status:** todo
 
 ### Stage 78: Demo video
-- A printer nobody could use, working from a phone, in under ninety seconds.
+- A printer nobody could use, working in under ninety seconds.
+- The dashboard is a web page, so it can be filmed on a phone. That is not AirPrint and must not be
+  filmed as though it were: printer-cycle ships no connector, and implying otherwise would be the
+  first thing somebody felt lied to about.
 - **Status:** todo
 
 ### Stage 79: Launch posts
@@ -2402,3 +2401,9 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-09-06, after Stage 63b:** the fallback user is reachable from the dashboard at last. The
   method had existed since Stage 39 and nothing had ever called it, which is the kind of gap that
   only shows up when something actually uses the feature: writing the example connector found it.
+- **2026-09-06, Mohamed's call:** the AirPrint connector, Stages 64 to 66, is removed from the plan.
+  printer-cycle ships no connector. Nothing about the architecture changes, because the point those
+  stages existed to prove is already proven: the dashboard is a connector, and three more were
+  written from the specification alone while building this. What stays is what an outsider needs to
+  write their own. Stage 78 was reworded, because a demo filmed on a phone must not imply an AirPrint
+  connector that does not exist.

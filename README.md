@@ -41,7 +41,8 @@ The core is small on purpose. It does three things: sign in, add a printer, prin
 Everything else is a **connector**: a separate program, in its own repository, written by anyone,
 talking to core over a documented socket protocol. AirPrint, Mopria, Samba, a Telegram bot, a mobile
 app, all connectors. None of them ship with core, and none of them require a change to core in order
-to exist. Install one and its settings appear in the dashboard on their own.
+to exist. There are none to install yet: what exists is the protocol, a worked example, and a guide.
+Install one and its settings appear in the dashboard on their own.
 
 The dashboard is itself a connector, with no privileged access. Anything it can do, anything you
 write can do too.

@@ -1985,6 +1985,32 @@ where something later removes it gets a working print server rather than a silen
 ### Stage 62: Example connector, deliberately tiny
 - Under 150 lines, in its own directory, doing the handshake, declaring a setting, submitting a job.
 - **Done when:** someone can read it in five minutes and copy it.
+- **Status:** done, 2026-09-06. `examples/hello-printer`, 95 lines of code in one file with no
+  dependencies. Run against a live core it enrolled, reconnected, authenticated, registered its
+  manifest, streamed a PDF as binary frames and committed it: 167KB of PostScript came out of the
+  file-backed queue with the text intact.
+- **Node rather than Go**, and not because the project is fond of Node. Node 22 has WebSocket and
+  Ed25519 built in, so the example needs nothing installed, and being in another language is the
+  argument: the protocol is not a Go interface with a socket in front of it.
+- It imports nothing from this repository, which Stage 41 recorded as the point of the exercise. It
+  was written from PROTOCOL.md, and the two connectors written the same way at Stage 50 and Stage 51
+  are why the document can be trusted to be enough.
+
+**A connector that says `identity: "none"` submits jobs owned by nobody, and nothing can fix it.**
+Found by looking at the job the example produced: `user_id` came back empty. That is correct
+behaviour as far as it goes, because such a connector is meant to fall back to a user an
+administrator chose, and no administrator has chosen one. But `connectors.setFallbackUser` exists in
+core, is on the dashboard's allowlist, and **nothing in the interface calls it**, so there is no way
+to choose. Jobs from such a connector then belong to no one and appear on nobody's jobs page. This is
+the AirPrint case exactly, so it has to be settled before Stage 64. Added as Stage 63b.
+
+### Stage 63b: Choosing who a connector prints as (ADDED 2026-09-06)
+- A connector declaring `identity: "none"` cannot say who anybody is, so its jobs belong to the
+  fallback user an administrator picks. `connectors.setFallbackUser` has existed since Stage 39 and
+  the connectors page has never offered it.
+- Until it does, an AirPrint connector's jobs have no owner and show on nobody's jobs page.
+- **Done when:** a connector with no identity of its own can be given an owner from the dashboard,
+  and its jobs then appear as that person's.
 - **Status:** todo
 
 ### Stage 63: Connector author guide
@@ -2339,3 +2365,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   in all five families and under a live systemd. `--minimal` was starting nothing at all, because a
   ReadWritePaths entry pointing at a directory only the driver packages create makes systemd refuse
   to start the unit.
+- **2026-09-06, after Stage 62:** the example connector is 95 lines of dependency-free Node, written
+  from the specification and importing nothing from this repository. Printing with it surfaced Stage
+  63b: a connector with no identity of its own has nowhere to get an owner, because the method for
+  choosing one has never been wired into the interface.

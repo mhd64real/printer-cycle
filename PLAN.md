@@ -1926,7 +1926,33 @@ directory without checking, for a build or an air-gapped machine, and says so wh
 ### Stage 60: Service units
 - systemd, plus OpenRC for Alpine.
 - **Done when:** both binaries start on boot and restart on failure.
-- **Status:** todo
+- **Status:** done, 2026-09-06. Verified against a real systemd running as PID 1 in a privileged
+  container and against OpenRC on Alpine. Under systemd both are enabled and active, `kill -9` on
+  core brings it back with `NRestarts=1`, and the dashboard reconnects on its own. Under OpenRC both
+  run under supervise-daemon and a killed core respawns.
+- The units are written by the installer rather than shipped beside it, because the documented way to
+  install is to pipe one file into sh, and an installer that needs to fetch three more files is one
+  that fails differently on a machine behind a captive portal.
+- The dashboard `Wants` core rather than `Requires` it, so core restarting does not take the
+  interface down. Confirmed: the dashboard stayed up across a core restart and reconnected.
+
+**A fresh install could never finish setting itself up.** The dashboard read the enrolment token once
+at startup, and systemd starts both services in the same instant, so it read the file before core had
+written it and then retried the same empty value for ever: "that enrolment token is not valid",
+every eight seconds, with a perfectly good token sitting in the file it had already read. Core also
+issues a fresh token each time it starts until setup is done, which would have broken it a second
+way. The token is now read at every attempt, so the file is the source of truth rather than whatever
+it held at one moment.
+
+**Alpine's `adduser` does not create a matching group**, where `useradd --system` does. OpenRC then
+refuses to start the service with "group `printer-cycle` not found", which is at least a clear error.
+
+**And one that was not clear at all.** `supervise-daemon` opens its output redirection *after*
+dropping privileges, and `/var/log` is root-owned, so the child could not create its own log and died
+on the spot. From outside: the supervisor running, the service reporting "started", and nothing
+serving. No error anywhere, because the process that would have written one was the process that
+could not open the file. The installer now creates both log files owned by the service account before
+anything starts.
 
 ### Stage 61: Idempotency, minimal flag, uninstall
 - Re-running upgrades rather than breaking. `--minimal` skips the big driver set. An uninstall script
@@ -2286,3 +2312,8 @@ Every change to this plan gets a line here, so the reasoning survives.
   the development environment allows administration unauthenticated so nothing ever failed. Added
   `ca-certificates` and `curl` to the core packages, both absent from a bare Debian and both needed:
   one by the installer, one by core's own firmware fetch.
+- **2026-09-06, after Stage 60:** three bugs that only exist once something else starts the software.
+  A fresh install could never enrol, because the dashboard read the setup token once and systemd
+  starts both services at the same instant. Alpine's adduser leaves the account without a matching
+  group. And supervise-daemon drops privileges before opening its log, so the service reported
+  "started" while nothing ran at all.

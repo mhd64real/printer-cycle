@@ -63,12 +63,16 @@ func run() error {
 	var web *dashboard.Server
 
 	client, err := connector.New(connector.Options{
-		ID:         "dashboard",
-		CoreURL:    *coreURL,
-		KeyPath:    filepath.Join(*dataDir, "connector.key"),
-		SetupToken: tokenFrom(*setupToken),
-		Manifest:   manifest(),
-		Logger:     log,
+		ID:      "dashboard",
+		CoreURL: *coreURL,
+		KeyPath: filepath.Join(*dataDir, "connector.key"),
+		// Asked for at every attempt rather than read once. Core issues a fresh
+		// token each time it starts until setup is finished and invalidates the
+		// previous one, and systemd starts both at the same moment, so a value
+		// captured at startup can be stale before it is ever used.
+		SetupTokenFunc: func() string { return tokenFrom(*setupToken) },
+		Manifest:       manifest(),
+		Logger:         log,
 		OnNotify: func(method string, params json.RawMessage) {
 			web.HandleNotification(method, params)
 		},
@@ -123,6 +127,9 @@ func manifest() any {
 // tokenFrom accepts a token directly or reads one from a file, since core writes
 // its setup token to disk and asking somebody to copy it by hand is worse than
 // pointing at it.
+// tokenFrom reads the token, which may be a path to a file core writes or the
+// token itself. Called at every enrolment attempt, so the file is the source of
+// truth rather than whatever it happened to hold at startup.
 func tokenFrom(value string) string {
 	if value == "" {
 		return ""

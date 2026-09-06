@@ -44,6 +44,21 @@ type Options struct {
 	// SetupToken enrols this connector's key. Needed once; ignored afterwards.
 	SetupToken string
 
+	// SetupTokenFunc is asked for the token at each attempt, when set, and
+	// takes precedence over SetupToken.
+	//
+	// It exists because a token read once at startup goes stale. Core issues a
+	// fresh one every time it starts until setup is finished, and invalidates
+	// the previous one, so a connector holding a value from before core last
+	// started will be refused for ever. Worse, both are started at the same
+	// moment by the same init system, so on a first boot the connector can read
+	// the file before core has written it and never look again.
+	//
+	// Observed exactly that way: a fresh install left the dashboard retrying
+	// "that enrolment token is not valid" indefinitely, with a perfectly good
+	// token sitting in the file it had already read.
+	SetupTokenFunc func() string
+
 	// Manifest is sent on every connection, so core and the dashboard describe
 	// the version that is actually running rather than the one first installed.
 	Manifest any
@@ -99,6 +114,14 @@ func New(opts Options) (*Client, error) {
 		return nil, err
 	}
 	return &Client{opts: opts, log: opts.Logger, key: key}, nil
+}
+
+// setupToken is the enrolment token as it stands right now.
+func (c *Client) setupToken() string {
+	if c.opts.SetupTokenFunc != nil {
+		return c.opts.SetupTokenFunc()
+	}
+	return c.opts.SetupToken
 }
 
 // PublicKey is what core stores. Nothing here can impersonate this connector.
@@ -194,13 +217,14 @@ func (c *Client) handshake(ctx context.Context, rpc *jsonrpc.Conn, nonce []byte)
 		// A connector on its first run has a key core has never seen. If there
 		// is a setup token, spend it and try once more on this same connection:
 		// enrolling does not consume the authentication challenge.
-		if c.opts.SetupToken == "" {
+		token := c.setupToken()
+		if token == "" {
 			return fmt.Errorf("connector: core would not accept this connector: %w", err)
 		}
 
 		c.log.Info("not known to core yet, enrolling")
 		if err := rpc.Call(ctx, "enrol", map[string]any{
-			"token":      c.opts.SetupToken,
+			"token":      token,
 			"public_key": base64.StdEncoding.EncodeToString(c.PublicKey()),
 		}, nil); err != nil {
 			return fmt.Errorf("connector: enrolling: %w", err)

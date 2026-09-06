@@ -380,8 +380,14 @@ create_user() {
 		useradd --system --home-dir "$DATA_DIR" --no-create-home \
 			--shell /usr/sbin/nologin "$SERVICE_USER"
 	elif command -v adduser >/dev/null 2>&1; then
-		# busybox adduser, on Alpine. Different flags, same account.
-		adduser -S -D -H -h "$DATA_DIR" -s /sbin/nologin "$SERVICE_USER"
+		# busybox adduser, on Alpine. Different flags, and one difference that
+		# is not about flags at all: useradd --system creates a group of the
+		# same name and busybox adduser does not, so it has to be made first.
+		# Without it OpenRC refuses to start the service with
+		# "group `printer-cycle` not found", which is a clearer error than most
+		# and still took a container to see.
+		addgroup -S "$SERVICE_USER" 2>/dev/null || true
+		adduser -S -D -H -h "$DATA_DIR" -s /sbin/nologin -G "$SERVICE_USER" "$SERVICE_USER"
 	else
 		die "no useradd or adduser on this machine, so the $SERVICE_USER account cannot be created"
 	fi
@@ -509,6 +515,203 @@ install_binaries() {
 	say "installed $BIN_DIR/printer-cycle-core and $BIN_DIR/printer-cycle-dashboard"
 }
 
+# ---------------------------------------------------------------------------
+# Making it start on its own
+#
+# The units are written here rather than shipped beside this script, because the
+# documented way to install is to pipe this one file into sh. An installer that
+# needs to fetch three more files is an installer that fails differently on a
+# machine with a captive portal.
+# ---------------------------------------------------------------------------
+
+# init_system says what will be starting things.
+#
+# Asked of the machine rather than assumed from the distribution: Debian with
+# systemd removed is a real thing, and so is Alpine with systemd added.
+init_system() {
+	if [ -d /run/systemd/system ]; then
+		echo systemd
+	elif command -v rc-update >/dev/null 2>&1; then
+		echo openrc
+	elif command -v systemctl >/dev/null 2>&1; then
+		# systemd is installed but not running, which is what a container looks
+		# like. The units are still worth writing: the machine they end up on
+		# will boot with it.
+		echo systemd-inactive
+	else
+		echo none
+	fi
+}
+
+write_systemd_units() {
+	cat >/etc/systemd/system/printer-cycle-core.service <<UNIT
+[Unit]
+Description=printer-cycle core
+Documentation=https://github.com/mhd64real/printer-cycle
+# CUPS is what core talks to, and it talks over cups.socket, so the socket
+# rather than the service: systemd starts cupsd on first connection.
+After=network.target cups.socket
+Wants=cups.socket
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+# The group CUPS treats as administrators. Without it core cannot add a printer,
+# and CUPS silently blanks the name and owner of every job it lists.
+SupplementaryGroups=$(cups_admin_group)
+ExecStart=$BIN_DIR/printer-cycle-core
+EnvironmentFile=-$CONFIG_DIR/core.env
+Restart=on-failure
+RestartSec=5s
+
+# A print server has no business doing most of what a process may do.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+# The database, and the firmware directory, which core writes into when a
+# printer needs a file it has to fetch.
+ReadWritePaths=$DATA_DIR /lib/firmware/hp
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+	cat >/etc/systemd/system/printer-cycle-dashboard.service <<UNIT
+[Unit]
+Description=printer-cycle dashboard
+Documentation=https://github.com/mhd64real/printer-cycle
+After=printer-cycle-core.service
+# Wants rather than Requires: the dashboard reconnects on its own, and core
+# restarting should not take the interface down with it.
+Wants=printer-cycle-core.service
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+Group=$SERVICE_USER
+ExecStart=$BIN_DIR/printer-cycle-dashboard --setup-token $DATA_DIR/setup-token
+EnvironmentFile=-$CONFIG_DIR/dashboard.env
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=$DATA_DIR
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+	say "wrote systemd units"
+}
+
+write_openrc_services() {
+	# supervise-daemon rather than start-stop-daemon, because it is the one
+	# that notices a process dying and starts it again. start-stop-daemon
+	# launches and forgets.
+	cat >/etc/init.d/printer-cycle-core <<'UNIT'
+#!/sbin/openrc-run
+
+name="printer-cycle core"
+description="printer-cycle core"
+
+command="/usr/local/bin/printer-cycle-core"
+# The user only, not user:group. OpenRC passes a "user:group" through to
+# supervise-daemon as two arguments rather than as --user and --group, and the
+# child then dies on exec leaving a defunct process, while the service reports
+# itself started. The account's primary group is already the right one, so
+# naming it bought nothing and cost that.
+command_user="printer-cycle"
+supervisor="supervise-daemon"
+respawn_delay=5
+respawn_max=0
+output_log="/var/log/printer-cycle-core.log"
+error_log="/var/log/printer-cycle-core.log"
+
+depend() {
+	need net
+	after cupsd
+}
+UNIT
+
+	cat >/etc/init.d/printer-cycle-dashboard <<'UNIT'
+#!/sbin/openrc-run
+
+name="printer-cycle dashboard"
+description="printer-cycle dashboard"
+
+command="/usr/local/bin/printer-cycle-dashboard"
+command_args="--setup-token /var/lib/printer-cycle/setup-token"
+command_user="printer-cycle"
+supervisor="supervise-daemon"
+respawn_delay=5
+respawn_max=0
+output_log="/var/log/printer-cycle-dashboard.log"
+error_log="/var/log/printer-cycle-dashboard.log"
+
+depend() {
+	need net
+	after printer-cycle-core
+}
+UNIT
+
+	chmod 0755 /etc/init.d/printer-cycle-core /etc/init.d/printer-cycle-dashboard
+
+	# The log files have to exist and be owned by the service account before
+	# anything starts.
+	#
+	# supervise-daemon opens the redirection after dropping privileges, and
+	# /var/log is root-owned, so the child cannot create its own log and dies on
+	# the spot. What that looks like from outside is the worst possible thing:
+	# the supervisor is running, the service reports "started", and nothing is
+	# serving. There is no error anywhere, because the process that would have
+	# written it is the one that could not open the file.
+	for log in /var/log/printer-cycle-core.log /var/log/printer-cycle-dashboard.log; do
+		touch "$log"
+		chown "$SERVICE_USER" "$log" 2>/dev/null || true
+		chmod 0640 "$log"
+	done
+
+	say "wrote OpenRC services"
+}
+
+install_services() {
+	init=$(init_system)
+	case "$init" in
+	systemd | systemd-inactive)
+		write_systemd_units
+		if [ "$init" = systemd ]; then
+			systemctl daemon-reload
+			systemctl enable --now printer-cycle-core.service printer-cycle-dashboard.service
+			say "core and the dashboard are running, and will start on boot"
+		else
+			say "systemd is installed but not running here, so the units were written and not started"
+		fi
+		;;
+	openrc)
+		write_openrc_services
+		rc-update add printer-cycle-core default >/dev/null 2>&1 || true
+		rc-update add printer-cycle-dashboard default >/dev/null 2>&1 || true
+		rc-service printer-cycle-core start >/dev/null 2>&1 || true
+		rc-service printer-cycle-dashboard start >/dev/null 2>&1 || true
+		say "core and the dashboard added to the default runlevel"
+		;;
+	none)
+		warn "this machine has neither systemd nor OpenRC, so nothing was set up to start on boot. Run $BIN_DIR/printer-cycle-core and $BIN_DIR/printer-cycle-dashboard yourself."
+		;;
+	esac
+}
+
 do_install() {
 	require_root
 
@@ -549,6 +752,7 @@ do_install() {
 	create_user
 	create_directories
 	install_binaries
+	install_services
 
 	say "done"
 }

@@ -99,6 +99,15 @@ export type Connector = {
   scopes: string[];
   settings_schema: SettingField[];
   settings: Record<string, unknown>;
+
+  /**
+   * Who this connector's jobs belong to when it cannot say who is printing.
+   *
+   * Only meaningful when identity is "none", and empty until somebody chooses.
+   * Empty is worth showing rather than hiding: those jobs then belong to nobody
+   * and appear on nobody's jobs page.
+   */
+  fallback_user?: string;
 };
 
 /** An external account bound to a printer-cycle user. */
@@ -285,6 +294,12 @@ export const api = {
     call<{ connector_id: string; enabled: boolean }>("connectors.setEnabled", {
       connector_id: id,
       enabled,
+    }),
+
+  setConnectorFallbackUser: (id: string, userId: string) =>
+    call<{ connector_id: string; user_id: string }>("connectors.setFallbackUser", {
+      connector_id: id,
+      user_id: userId,
     }),
 
   setConnectorSetting: (id: string, key: string, value: unknown) =>

@@ -39,6 +39,16 @@ type connectorView struct {
 	Scopes         []string             `json:"scopes"`
 	SettingsSchema store.SettingsSchema `json:"settings_schema"`
 	Settings       map[string]any       `json:"settings"`
+
+	// FallbackUser is who this connector's jobs belong to when it cannot say
+	// who is printing. Only meaningful for a connector declaring
+	// identity "none", and empty until an administrator chooses.
+	//
+	// Reported because the interface cannot offer a choice it cannot see the
+	// current value of, and because "nobody has chosen yet" is the state worth
+	// showing: jobs from such a connector belong to no one and appear on
+	// nobody's jobs page.
+	FallbackUser string `json:"fallback_user,omitempty"`
 }
 
 // connectorsList is what the dashboard renders its connectors page from.
@@ -89,6 +99,7 @@ func (c *conn) connectorsList(ctx context.Context) (any, error) {
 			Scopes:         scopes,
 			SettingsSchema: schema,
 			Settings:       settings,
+			FallbackUser:   connector.FallbackUserID,
 		})
 	}
 	// The scope catalogue travels with the list, so an interface offering to

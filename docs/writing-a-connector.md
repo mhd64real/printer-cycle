@@ -90,12 +90,12 @@ There is no third option where core takes your word.
 
 **`identity: "none"`** means you cannot tell. AirPrint is this: a phone on the
 network prints without authenticating, because that is what AirPrint is. Jobs go
-to a fallback user an administrator chooses for your connector.
+to a user an administrator picks on the Connectors page, under "Prints as".
 
-> **Not finished yet.** `connectors.setFallbackUser` exists, but nothing in the
-> dashboard calls it, so an administrator currently has no way to choose. Until
-> that is built, jobs from an `identity: "none"` connector have no owner and
-> appear on nobody's jobs page. Tracked as Stage 63b.
+Until somebody is picked, your jobs belong to nobody and appear on nobody's jobs
+page. That is worth saying in your own documentation, because it is the first
+thing an administrator will get wrong: the connector works, prints, and its jobs
+are nowhere.
 
 ## Sending a document
 

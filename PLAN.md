@@ -2011,7 +2011,16 @@ the AirPrint case exactly, so it has to be settled before Stage 64. Added as Sta
 - Until it does, an AirPrint connector's jobs have no owner and show on nobody's jobs page.
 - **Done when:** a connector with no identity of its own can be given an owner from the dashboard,
   and its jobs then appear as that person's.
-- **Status:** todo
+- **Status:** done, 2026-09-06. Demonstrated in both states with the example connector: with nobody
+  chosen the job came back `user_id: ""` and appeared on nobody's page, and after choosing an owner
+  in the browser the next job carried it and showed up as that person's.
+- Shown only for connectors declaring `identity: "none"`. One that can identify people has no use for
+  it, and offering it anyway would suggest it overrides them, which it does not.
+- The empty state says what it costs: "until somebody is chosen, anything printed through this
+  connector belongs to no one and shows on nobody's jobs page". A blank dropdown would have been the
+  same bug with less to read.
+- `connectors.list` had to start reporting the current value, because an interface cannot offer a
+  choice whose current setting it cannot see.
 
 ### Stage 63: Connector author guide
 - `docs/writing-a-connector.md`, built around the example.
@@ -2390,3 +2399,6 @@ Every change to this plan gets a line here, so the reasoning survives.
 - **2026-09-06, after Stage 63:** the connector guide is built from what building this actually cost
   rather than from the protocol document. Two error shapes in the draft were wrong and were corrected
   by provoking them against a running core, which is the only way that kind of mistake gets caught.
+- **2026-09-06, after Stage 63b:** the fallback user is reachable from the dashboard at last. The
+  method had existed since Stage 39 and nothing had ever called it, which is the kind of gap that
+  only shows up when something actually uses the feature: writing the example connector found it.

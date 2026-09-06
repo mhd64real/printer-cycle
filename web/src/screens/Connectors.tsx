@@ -4,7 +4,7 @@ import { Button } from "@/components/Button";
 import { Field } from "@/components/Field";
 import { Notice } from "@/components/Notice";
 import { SettingsForm } from "@/components/SettingsForm";
-import { api, type Connector } from "@/api";
+import { api, type Connector, type User } from "@/api";
 
 /**
  * The connectors page.
@@ -18,6 +18,7 @@ import { api, type Connector } from "@/api";
  */
 export function Connectors() {
   const [connectors, setConnectors] = useState<Connector[] | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
   const [scopes, setScopes] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
@@ -25,9 +26,13 @@ export function Connectors() {
 
   const load = useCallback(async () => {
     try {
-      const { connectors, known_scopes } = await api.connectors();
+      const [{ connectors, known_scopes }, { users }] = await Promise.all([
+        api.connectors(),
+        api.users(),
+      ]);
       setConnectors(connectors ?? []);
       setScopes(known_scopes ?? []);
+      setUsers(users ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "cannot list the connectors");
     }
@@ -117,6 +122,15 @@ export function Connectors() {
                 </Button>
               </div>
 
+              {connector.identity === "none" ? (
+                <PrintsAs
+                  connector={connector}
+                  users={users}
+                  onChanged={load}
+                  disabled={!connector.enabled}
+                />
+              ) : null}
+
               <SettingsForm
                 fields={connector.settings_schema ?? []}
                 values={connector.settings ?? {}}
@@ -129,6 +143,83 @@ export function Connectors() {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * Who a connector prints as, when it cannot say.
+ *
+ * A connector declaring identity "none" has no way to tell who is printing.
+ * AirPrint is the case this exists for: a phone on the network prints without
+ * authenticating, because that is what AirPrint is. Its jobs go to somebody an
+ * administrator picks.
+ *
+ * Shown only for those connectors. One that can identify people has no use for
+ * it, and offering it anyway would suggest it overrides them, which it does not.
+ */
+function PrintsAs({
+  connector,
+  users,
+  onChanged,
+  disabled,
+}: {
+  connector: Connector;
+  users: User[];
+  onChanged: () => void;
+  disabled?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function choose(userId: string) {
+    if (!userId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setConnectorFallbackUser(connector.id, userId);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not set that");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      <label htmlFor={`prints-as-${connector.id}`} className="block text-sm font-medium">
+        Prints as
+      </label>
+      <p className="text-sm text-muted">
+        This connector cannot tell who is printing, so its jobs belong to whoever you choose
+        here.
+      </p>
+      <select
+        id={`prints-as-${connector.id}`}
+        value={connector.fallback_user ?? ""}
+        onChange={(e) => choose(e.target.value)}
+        disabled={disabled || busy || users.length === 0}
+        className="rounded-md border border-line bg-raised px-3 py-2 text-ink disabled:opacity-60"
+      >
+        <option value="">Nobody yet</option>
+        {users.map((user) => (
+          <option key={user.id} value={user.id}>
+            {user.display_name || user.username}
+          </option>
+        ))}
+      </select>
+      {!connector.fallback_user ? (
+        <p className="text-sm text-muted">
+          Until somebody is chosen, anything printed through this connector belongs to no one
+          and shows on nobody's jobs page.
+        </p>
+      ) : null}
+      {error ? (
+        <div className="mt-2">
+          <Notice>{error}</Notice>
+        </div>
+      ) : null}
     </div>
   );
 }

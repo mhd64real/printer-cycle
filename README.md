@@ -6,14 +6,15 @@ A print server for old printers, and for printers whose software is worse than t
 
 ## Status
 
-**It works. There is no release yet.**
+**v0.1.0 is out. It has never met a real printer.**
 
-Discovery, pairing, printing, live job status, users, connectors and the installer are all built and
-tested. What is missing is a tagged release with published binaries, and any use on real hardware:
-every printer this has ever driven has been a virtual one, and every install has been a container.
-That gap is the reason there is no version number.
+Discovery, pairing, printing, live job status, users, connectors and the installer are all built,
+tested and released for 64-bit ARM, 32-bit ARM and x86-64. What is missing is real hardware: every
+printer this has driven has been a virtual one and every install has been a container. That has been
+enough to find a great many bugs and it is not the same as working.
 
-If you want to run it today, build it and install from the build. See [Installing](#installing).
+If you run it on a real printer, a report is the most useful thing you could contribute. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 What works, what needs firmware, and what cannot work on ARM is measured and listed in
 [docs/compatibility.md](docs/compatibility.md).
@@ -55,14 +56,14 @@ Job status arrives as it happens, pushed rather than polled:
 
 ## Installing
 
-There is no release yet, so the one-liner below has nothing to download. It is what will work from
-v0.1.0:
-
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mhd64real/printer-cycle/main/install.sh | sudo sh
 ```
 
-Today, build it and install from the build:
+Binaries are published with a `SHA256SUMS` file, and the installer verifies them: if a checksum does
+not match it installs nothing and stops.
+
+To install from source instead:
 
 ```sh
 git clone https://github.com/mhd64real/printer-cycle

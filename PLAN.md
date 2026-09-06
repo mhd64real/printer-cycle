@@ -2199,7 +2199,19 @@ device id is shown on the Printers page, which it is not.
 
 ### Stage 75: v0.1.0 release
 - Tagged, with binaries for all three architectures and checksums.
-- **Status:** todo
+- **Status:** done, 2026-09-06. Six binaries and a `SHA256SUMS`, published at
+  https://github.com/mhd64real/printer-cycle/releases/tag/v0.1.0.
+- **The download path was proven before publishing, not after.** A local server stood in for the
+  release: the installer downloaded, verified, installed, and reported v0.1.0. Then the checksum file
+  was corrupted deliberately, and the installer refused, named both hashes, installed nothing and
+  exited 1.
+- **And proven again afterwards against the real thing**, by running the exact one-liner from the
+  README in a bare Debian container. It fetched from GitHub, verified, installed, and both binaries
+  reported v0.1.0.
+- The release notes lead with "it works, and it has never met a real printer", and put the ARM wall,
+  the firmware models, the Alpine limits and the absence of connectors above the install
+  instructions rather than below them.
+- The README's Status block was corrected in the same commit, because it said there was no release.
 
 ### Stage 76: Screenshots
 - The pairing flow, the print page, live job status.
@@ -2517,3 +2529,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   agreement. Core can never be relicensed, which is deliberate: the paid version that might exist one
   day does not need a proprietary core, because connectors are separate programs and can be licensed
   however their authors like. Phase 10 finished.
+- **2026-09-06, after Stage 75:** v0.1.0 published, with Mohamed's go-ahead on an outward-facing
+  action. The install path was verified twice, once against a stand-in server before publishing and
+  once against the real release afterwards, including that a bad checksum installs nothing.

@@ -2149,7 +2149,21 @@ works", and a compatibility list is exactly the document where that distinction 
 
 ### Stage 73: Architecture document
 - Why CUPS, why connectors are processes, why the protocol is what it is.
-- **Status:** todo
+- **Status:** done, 2026-09-06. `docs/architecture.md`, the reasoning rather than the specification,
+  and it says so at the top: the wire format, the how-to, the schema and the numbers each have their
+  own document and this one does not repeat them.
+- Every decision is given with what it cost as well as what it bought. The dashboard being an
+  ordinary connector costs a real handshake before the interface works at all, and buys the fact that
+  the protocol cannot quietly grow gaps wherever a back door would have been convenient.
+
+**It ends with what was wrong**, because a design document listing only good decisions is a sales
+page. Four groups: the specification describing things that did not exist, the development
+environment being wrong twice and hiding real bugs both times, methods that worked only because
+nothing had used them yet, and two bugs that were only ever visible on screen.
+
+**Every factual claim was checked against the code rather than recalled**: the single connection, the
+frame sizes, the deprecation warning `lpadmin` prints, and the CUPS 3.0 position, which is that
+Debian trixie ships 2.4.10 with drivers deprecated and working.
 
 ### Stage 74: Contributing, and the licence decision made deliberately
 - Contribution terms, and a conscious choice about whether accepting outside code forecloses ever
@@ -2473,3 +2487,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   installer produces, not the development one, after a first draft quietly mixed the two. The useful
   finding is that a proprietary driver usually is not a wall: 22 of the 70 affected models have an
   open alternative that the ranking already prefers, leaving 48 genuinely stranded on ARM.
+- **2026-09-06, after Stage 73:** the architecture document explains the reasoning and ends with the
+  four groups of things that were wrong. That section is the useful half: a design rationale nobody
+  can check is indistinguishable from marketing.

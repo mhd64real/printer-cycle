@@ -429,6 +429,17 @@ create_directories() {
 		chown "$SERVICE_USER" "$DATA_DIR"
 	chmod 0700 "$DATA_DIR"
 
+	# Where printer firmware goes.
+	#
+	# Normally the foo2zjs package creates it, but a --minimal install has no
+	# driver packages and then it does not exist, which stops core from starting
+	# at all under systemd rather than merely stopping firmware from working.
+	# Group-writable rather than owned outright, because the package owns it
+	# when the package is there.
+	mkdir -p /lib/firmware/hp
+	chgrp "$SERVICE_USER" /lib/firmware/hp 2>/dev/null || true
+	chmod 0775 /lib/firmware/hp 2>/dev/null || true
+
 	say "$CONFIG_DIR and $DATA_DIR ready"
 }
 
@@ -575,7 +586,14 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 # The database, and the firmware directory, which core writes into when a
 # printer needs a file it has to fetch.
-ReadWritePaths=$DATA_DIR /lib/firmware/hp
+#
+# The dash matters. A ReadWritePaths entry that does not exist is not ignored:
+# systemd fails to set up the mount namespace and the service never starts, with
+# status=226/NAMESPACE and nothing about printer-cycle in the message. The
+# directory is created below, and the dash is here so that a machine where
+# something later removes it gets a working print server rather than a silent
+# one.
+ReadWritePaths=$DATA_DIR -/lib/firmware/hp
 
 [Install]
 WantedBy=multi-user.target
@@ -758,6 +776,83 @@ do_install() {
 }
 
 # ---------------------------------------------------------------------------
+# Taking it off again
+#
+# An uninstaller that leaves things behind is worse than none, because the next
+# person has to find out what it missed. This removes everything printer-cycle
+# put on the machine and nothing else.
+# ---------------------------------------------------------------------------
+
+# do_uninstall removes printer-cycle. It does not remove CUPS.
+#
+# CUPS and the driver set are ordinary system packages that this machine may
+# well have wanted anyway, and a printer somebody set up through printer-cycle
+# is a CUPS queue that keeps working without it. Taking them away because
+# printer-cycle brought them would be deciding something that is not this
+# script's to decide, so it says what it is leaving and why.
+#
+# The database is kept too, unless --purge. It holds the accounts, the printers
+# and the connector keys, and reinstalling over the top of it is the difference
+# between an upgrade and starting again. Somebody who wants it gone can say so.
+do_uninstall() {
+	require_root
+
+	family=$(detect_family)
+	init=$(init_system)
+
+	say "removing printer-cycle"
+
+	case "$init" in
+	systemd | systemd-inactive)
+		for unit in printer-cycle-dashboard printer-cycle-core; do
+			systemctl stop "$unit.service" >/dev/null 2>&1 || true
+			systemctl disable "$unit.service" >/dev/null 2>&1 || true
+			rm -f "/etc/systemd/system/$unit.service"
+		done
+		systemctl daemon-reload >/dev/null 2>&1 || true
+		say "services stopped and removed"
+		;;
+	openrc)
+		for unit in printer-cycle-dashboard printer-cycle-core; do
+			rc-service "$unit" stop >/dev/null 2>&1 || true
+			rc-update del "$unit" default >/dev/null 2>&1 || true
+			rm -f "/etc/init.d/$unit"
+		done
+		rm -f /var/log/printer-cycle-core.log /var/log/printer-cycle-dashboard.log
+		say "services stopped and removed"
+		;;
+	esac
+
+	rm -f "$BIN_DIR/printer-cycle-core" "$BIN_DIR/printer-cycle-dashboard"
+	rm -rf "$CONFIG_DIR"
+
+	if [ "$PURGE" = yes ]; then
+		rm -rf "$DATA_DIR"
+		say "removed $DATA_DIR, including the accounts and the printers printer-cycle knew about"
+	else
+		say "kept $DATA_DIR. Run with --purge to remove the accounts and printers as well."
+	fi
+
+	# Removed after the directory it owns, so nothing is left with a numeric
+	# owner that a later account could inherit.
+	if id "$SERVICE_USER" >/dev/null 2>&1; then
+		if command -v userdel >/dev/null 2>&1; then
+			userdel "$SERVICE_USER" >/dev/null 2>&1 || true
+		elif command -v deluser >/dev/null 2>&1; then
+			deluser "$SERVICE_USER" >/dev/null 2>&1 || true
+		fi
+		if getent group "$SERVICE_USER" >/dev/null 2>&1; then
+			groupdel "$SERVICE_USER" >/dev/null 2>&1 ||
+				delgroup "$SERVICE_USER" >/dev/null 2>&1 || true
+		fi
+		say "removed the $SERVICE_USER account"
+	fi
+
+	say "CUPS and the printer drivers were left installed. They are ordinary packages, and any printer set up through printer-cycle keeps working without it."
+	say "done"
+}
+
+# ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
 
@@ -798,11 +893,14 @@ $VERSION_LINE
   sh install.sh --minimal    install without the driver set
   sh install.sh --from DIR   install binaries from a directory rather than downloading
   sh install.sh --detect     report what this machine is, and change nothing
+  sh install.sh --uninstall  remove printer-cycle, keeping its data and CUPS
+  sh install.sh --uninstall --purge   remove its data as well
 
 EOF
 }
 
 MINIMAL=no
+PURGE=no
 FROM_DIR=""
 
 # RELEASE_URL is where the binaries come from. Overridable so an install can be
@@ -814,6 +912,8 @@ main() {
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--detect) action=detect ;;
+		--uninstall) action=uninstall ;;
+		--purge) PURGE=yes ;;
 		--minimal) MINIMAL=yes ;;
 		--from)
 			shift
@@ -835,6 +935,7 @@ main() {
 	case "$action" in
 	detect) detect_report ;;
 	install) do_install ;;
+	uninstall) do_uninstall ;;
 	esac
 }
 

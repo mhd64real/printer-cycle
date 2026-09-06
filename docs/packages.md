@@ -46,6 +46,15 @@ printers needing no driver will print, which means IPP Everywhere and so most
 hardware made since about 2015, and adding a printer may need its address rather
 than its name. Both are printed as warnings by `install.sh --detect`.
 
+**Emulation stops working, and looks like a real answer.** Halfway through this
+work every `--platform linux/amd64` container began failing with
+`exec /usr/bin/uname: exec format error`, including Debian, which had worked an
+hour earlier. The binfmt handlers had gone. Restoring them:
+
+```sh
+docker run --privileged --rm tonistiigi/binfmt --install amd64
+```
+
 **Arch needed `--security-opt seccomp=unconfined` to check at all**, under
 emulation on an ARM host. pacman drops to a sandbox user and its seccomp filter
 fails there, which has nothing to do with printer-cycle and everything to do

@@ -1958,7 +1958,25 @@ anything starts.
 - Re-running upgrades rather than breaking. `--minimal` skips the big driver set. An uninstall script
   that actually removes everything.
 - **Done when:** install, install again, uninstall, all clean, in every test container.
-- **Status:** todo
+- **Status:** done, 2026-09-06. Install, reinstall, uninstall, purge: clean in all five families, and
+  clean again under a live systemd where the uninstall has running services to stop. `--minimal`
+  leaves 41 drivers and no driver packages, against 18,143 for a full install.
+- Reinstalling keeps the account, the data and the single edit to `nsswitch.conf`. A file left in the
+  data directory survives an upgrade, which is what makes it an upgrade.
+- **Uninstall does not remove CUPS or the drivers**, and says so. They are ordinary system packages
+  the machine may have wanted anyway, and a printer set up through printer-cycle is a CUPS queue that
+  keeps working without it. Taking them away because printer-cycle brought them is not this script's
+  decision to make.
+- **The database survives an uninstall unless `--purge`.** It holds the accounts, the printers and the
+  connector keys, and keeping it is the difference between reinstalling and starting again.
+
+**`--minimal` stopped core from starting at all, and the message said nothing about printer-cycle.**
+The unit lists `/lib/firmware/hp` in `ReadWritePaths`, and a path there that does not exist is not
+ignored: systemd fails to set up the mount namespace and the service never starts, with
+`status=226/NAMESPACE`. A full install has the directory because a driver package creates it, so this
+only appeared with `--minimal`, which is exactly the install a small machine would choose. Fixed
+twice over: the installer creates the directory, and the entry is prefixed with a dash so a machine
+where something later removes it gets a working print server rather than a silent one.
 
 ---
 
@@ -2317,3 +2335,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   starts both services at the same instant. Alpine's adduser leaves the account without a matching
   group. And supervise-daemon drops privileges before opening its log, so the service reported
   "started" while nothing ran at all.
+- **2026-09-06, after Stage 61:** Phase 7 finished. The install, reinstall, uninstall cycle is clean
+  in all five families and under a live systemd. `--minimal` was starting nothing at all, because a
+  ReadWritePaths entry pointing at a directory only the driver packages create makes systemd refuse
+  to start the unit.

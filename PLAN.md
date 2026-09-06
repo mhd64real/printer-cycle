@@ -2128,7 +2128,24 @@ dashboard does listen on 6311, and the raw URL in the one-liner really does serv
 
 ### Stage 72: Compatibility list
 - What works, what needs firmware, what will never work on ARM and why.
-- **Status:** todo
+- **Status:** done, 2026-09-06. `docs/compatibility.md`, every number measured rather than estimated:
+  18,143 drivers covering 6,525 distinct models, 9 needing firmware, 48 with no driver that runs on
+  ARM.
+
+**Most printers with a proprietary driver are fine, and saying otherwise would have been alarming and
+wrong.** 70 models in the catalogue have a driver needing HP's closed x86 binary, and 22 of them also
+have an open one, which the ranking already prefers. Only the remaining 48 have no alternative, and
+those are listed by name.
+
+**The first draft mixed numbers from two different catalogues.** The driver count came from a real
+installer run and the model counts from the development container, which has a different package set.
+They were close enough to look consistent and were not the same measurement. Everything was recomputed
+against one catalogue, the one `install.sh` actually produces, which moved the model count from 6,383
+to 6,525.
+
+**The page says at the top that no printer on it has been plugged in.** It describes what the driver
+catalogue contains and what printer-cycle does with it, which is a different claim from "this printer
+works", and a compatibility list is exactly the document where that distinction gets lost.
 
 ### Stage 73: Architecture document
 - Why CUPS, why connectors are processes, why the protocol is what it is.
@@ -2452,3 +2469,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   a long way back. Corrected, along with an install section that distinguishes the command that works
   today from the one that will work after a release, and a limitations section carrying what the
   build actually found rather than what was guessed at the start.
+- **2026-09-06, after Stage 72:** the compatibility list is measured against the catalogue the
+  installer produces, not the development one, after a first draft quietly mixed the two. The useful
+  finding is that a proprietary driver usually is not a wall: 22 of the 70 affected models have an
+  open alternative that the ranking already prefers, leaving 48 genuinely stranded on ARM.

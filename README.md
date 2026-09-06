@@ -15,6 +15,9 @@ That gap is the reason there is no version number.
 
 If you want to run it today, build it and install from the build. See [Installing](#installing).
 
+What works, what needs firmware, and what cannot work on ARM is measured and listed in
+[docs/compatibility.md](docs/compatibility.md).
+
 Progress is tracked stage by stage in [PLAN.md](PLAN.md), including everything that turned out to be
 wrong along the way.
 
@@ -107,11 +110,12 @@ on whatever you already have.
 - **It does not scan.** Scanning is a separate stack entirely and it is out of scope. Not "not yet".
   Out of scope.
 - **It is not a cloud service.** No account, no server of ours, nothing phoning home.
-- **Some printers only ever had closed source x86 drivers.** Those will never run on an ARM board,
-  however long you wait. printer-cycle says so rather than failing quietly, and it will pick an open
-  driver over a proprietary one whenever there is a choice. Such printers do work if you run
-  printer-cycle on an old x86 machine instead.
-- **A few printers hold no firmware of their own** and load it from the host every time they are
+- **48 printer models have no driver that runs on ARM.** Their only driver depends on a closed binary
+  published for Intel and AMD alone, so on a Raspberry Pi it does not run at all. printer-cycle says
+  so rather than failing quietly, and it picks an open driver over a proprietary one whenever there
+  is a choice. Those printers work normally on an x86 machine. The list is in
+  [docs/compatibility.md](docs/compatibility.md).
+- **Nine printer models hold no firmware of their own** and load it from the host every time they are
   switched on, from a file no distribution is allowed to ship. printer-cycle recognises them, says so
   before you pair, and can fetch the file once given a network. Until it does, the printer prints
   nothing and reports no error, which is exactly how those printers look broken when they are not.

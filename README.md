@@ -52,7 +52,13 @@ printer configured for double-sided stays that way:
 
 Job status arrives as it happens, pushed rather than polled:
 
-![The jobs page](docs/screenshots/jobs.png)
+![The jobs page, two documents waiting and one printed](docs/screenshots/jobs.png)
+
+Connectors configure themselves. The settings below are drawn from a schema the connector declared at
+startup, and the dashboard contains no code that knows anything about it. The dashboard is in the
+list too, because it is a connector like any other:
+
+![The connectors page](docs/screenshots/connectors.png)
 
 ## Installing
 

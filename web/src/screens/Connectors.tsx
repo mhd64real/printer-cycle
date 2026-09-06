@@ -109,17 +109,25 @@ export function Connectors() {
                   <p className="mt-0.5 text-sm text-muted">{describe(connector)}</p>
                 </div>
 
-                <Button
-                  variant="plain"
-                  onClick={() => toggle(connector)}
-                  disabled={switching === connector.id}
-                >
-                  {switching === connector.id
-                    ? "Working"
-                    : connector.enabled
-                      ? "Turn off"
-                      : "Turn on"}
-                </Button>
+                {/*
+                  No switch for this dashboard's own entry. Core refuses to let
+                  a connector switch itself off, since the refusal would arrive
+                  after the interface had already gone, so offering the button
+                  only ever produces an error message.
+                */}
+                {connector.is_self ? null : (
+                  <Button
+                    variant="plain"
+                    onClick={() => toggle(connector)}
+                    disabled={switching === connector.id}
+                  >
+                    {switching === connector.id
+                      ? "Working"
+                      : connector.enabled
+                        ? "Turn off"
+                        : "Turn on"}
+                  </Button>
+                )}
               </div>
 
               {connector.identity === "none" ? (
@@ -356,6 +364,11 @@ function Invite({
  * crashed or has not been started.
  */
 function describe(connector: Connector): string {
+  // Said plainly for this dashboard's own entry, because a card with no switch
+  // reads as broken unless the reason is on it. It also answers the question
+  // the page raises by listing the dashboard at all: yes, this is the thing you
+  // are looking at, and it holds no privilege the others do not.
+  if (connector.is_self) return "On, connected. This is the page you are on.";
   if (!connector.enabled) return "Turned off";
   if (!connector.enrolled) return "On, waiting to be enrolled";
   return connector.connected ? "On, connected" : "On, not running";

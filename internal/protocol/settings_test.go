@@ -316,3 +316,60 @@ func TestSwitchingAConnectorNeedsTheManageScope(t *testing.T) {
 		t.Fatal("switching a connector was allowed with only the read scope")
 	}
 }
+
+// A connector is told which entry in the list is itself.
+//
+// Core refuses to let a connector switch itself off, so an interface that
+// cannot tell which entry is its own draws a button that can only ever produce
+// an error. The dashboard is a connector and appears in its own list, so this
+// is every page load rather than an edge case.
+func TestAConnectorIsToldWhichEntryIsItself(t *testing.T) {
+	url, db := testServer(t)
+
+	dashboard := authedClient(t, url, db, "dashboard", []string{
+		store.ScopeConnectorsRead, store.ScopeConnectorsManage,
+	})
+	telegram := authedClient(t, url, db, "telegram", []string{store.ScopeJobsSubmit})
+	registerTelegram(t, telegram)
+
+	resp := dashboard.call("connectors.list", nil)
+	if resp.Error != nil {
+		t.Fatal(resp.Error)
+	}
+
+	var listed struct {
+		Connectors []struct {
+			ID   string `json:"id"`
+			Self bool   `json:"is_self"`
+		} `json:"connectors"`
+	}
+	if err := json.Unmarshal(resp.Result, &listed); err != nil {
+		t.Fatal(err)
+	}
+
+	var seen int
+	for _, connector := range listed.Connectors {
+		if want := connector.ID == "dashboard"; connector.Self != want {
+			t.Errorf("%s: is_self %v, want %v", connector.ID, connector.Self, want)
+		}
+		if connector.Self {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("%d connectors claimed to be the caller, want exactly 1", seen)
+	}
+
+	// The field is worth reporting only because of what it predicts, so check
+	// the prediction rather than trusting the flag.
+	if resp := dashboard.call("connectors.setEnabled", map[string]any{
+		"connector_id": "dashboard", "enabled": false,
+	}); resp.Error == nil {
+		t.Error("a connector switched itself off")
+	}
+	if resp := dashboard.call("connectors.setEnabled", map[string]any{
+		"connector_id": "telegram", "enabled": false,
+	}); resp.Error != nil {
+		t.Errorf("switching off a different connector: %v", resp.Error)
+	}
+}

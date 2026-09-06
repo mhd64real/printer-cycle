@@ -2215,7 +2215,31 @@ device id is shown on the Printers page, which it is not.
 
 ### Stage 76: Screenshots
 - The pairing flow, the print page, live job status.
-- **Status:** todo
+- **Status:** done.
+- Three shots existed from Stage 71. Two were kept, one was wrong and one was missing.
+- **The jobs shot was not live job status.** It was taken after both documents had finished, so it
+  showed two "Printed" rows: a screenshot of the least interesting moment. Retaken with the CUPS
+  queue held (`cupsdisable`) so two jobs sit in "Waiting on Office Laser" with their Stop buttons,
+  above one that has printed. That is the state a person actually looks at this page in.
+- **Nothing showed the connectors page**, which is where the architecture is visible rather than
+  merely claimed. Added, and taken against the real `examples/hello-printer` rather than a mock: the
+  invite was issued, the example enrolled, was refused for being switched off, was switched on, and
+  registered its manifest. The "Greeting" field in the shot is drawn from a schema the dashboard has
+  never seen. Using the real example rather than inventing a plausible connector matters, because a
+  screenshot of a "Telegram" connector would imply one ships, and none does.
+- **The screenshot found a bug, which is the second time this has happened.** The dashboard lists
+  itself and drew a "Turn off" button on its own card. Core has refused a connector switching itself
+  off since Stage 39 (the way back in would be editing the database by hand), so that button could
+  only ever produce an error message. Fixed at the source rather than in the client: `connectors.list`
+  now reports `is_self` on the caller's own entry, and the dashboard hides the switch and says "This
+  is the page you are on" instead. Hardcoding `id === "dashboard"` in TypeScript would have worked
+  and been wrong, since which connector is asking is core's fact.
+- The test asserts the prediction rather than the flag: exactly one entry claims to be the caller,
+  switching that one off is refused, and switching a different one off succeeds.
+- Retaken once more after rebuilding at `v0.1.0`, because the first attempt captured a version string
+  of `v0.1.0-1-g9ec6c41-dirty`. A build artefact in a launch screenshot is a small thing that reads
+  as carelessness.
+- `make check` clean, 262 tests pass, integration suite green.
 
 ### Stage 77: Landing page
 - The pitch, screenshots, install one-liner, link to the repo.

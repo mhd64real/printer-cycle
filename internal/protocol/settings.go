@@ -40,6 +40,19 @@ type connectorView struct {
 	SettingsSchema store.SettingsSchema `json:"settings_schema"`
 	Settings       map[string]any       `json:"settings"`
 
+	// Self marks the connector holding this connection.
+	//
+	// Reported because core refuses to let a connector switch itself off, and an
+	// interface that cannot tell which entry is its own draws a button that can
+	// only ever produce an error. The dashboard is a connector and appears in
+	// its own list, so this is not a rare case, it is every time the page loads.
+	//
+	// Not hardcoded as "dashboard" on the client, because which connector is
+	// asking is core's fact and nothing else's. A second interface, or a
+	// connector that lists its neighbours, gets the right answer without
+	// knowing what it was named.
+	Self bool `json:"is_self,omitempty"`
+
 	// FallbackUser is who this connector's jobs belong to when it cannot say
 	// who is printing. Only meaningful for a connector declaring
 	// identity "none", and empty until an administrator chooses.
@@ -68,6 +81,7 @@ func (c *conn) connectorsList(ctx context.Context) (any, error) {
 	}
 
 	connected := c.server.connectedIDs()
+	self := c.authenticated()
 
 	out := make([]connectorView, 0, len(connectors))
 	for _, connector := range connectors {
@@ -96,6 +110,7 @@ func (c *conn) connectorsList(ctx context.Context) (any, error) {
 			Enabled:        connector.Enabled,
 			Enrolled:       connector.Enrolled(),
 			Connected:      connected[connector.ID],
+			Self:           connector.ID == self.ID,
 			Scopes:         scopes,
 			SettingsSchema: schema,
 			Settings:       settings,

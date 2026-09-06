@@ -100,6 +100,9 @@ export type Connector = {
   settings_schema: SettingField[];
   settings: Record<string, unknown>;
 
+  /** True for the connector this dashboard is, which core will not let it switch off. */
+  is_self?: boolean;
+
   /**
    * Who this connector's jobs belong to when it cannot say who is printing.
    *

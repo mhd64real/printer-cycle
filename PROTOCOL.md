@@ -773,7 +773,11 @@ included; each appears as `{"secret":true,"set":true}` so the page can show that
 without showing what it is.
 
 Each entry also carries `connected`, so the page can distinguish a connector that is installed from
-one that is actually running.
+one that is actually running, and `is_self` on the one entry describing the caller. That last exists
+because core refuses to let a connector switch itself off, and an interface that cannot tell which
+entry is its own offers a button that can only ever fail. It is core's fact rather than the client's:
+a second interface, or a connector listing its neighbours, gets the right answer without knowing what
+it was named.
 
 **connectors.setSetting** changes one value. Requires `connectors.manage`.
 

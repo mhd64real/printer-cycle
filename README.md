@@ -46,7 +46,9 @@ to exist. Install one and its settings appear in the dashboard on their own.
 The dashboard is itself a connector, with no privileged access. Anything it can do, anything you
 write can do too.
 
-The protocol is specified in [PROTOCOL.md](PROTOCOL.md).
+The protocol is specified in [PROTOCOL.md](PROTOCOL.md). If you want to write a connector, start
+with [`examples/hello-printer`](examples/hello-printer), which does the whole thing in 95 lines of
+dependency-free Node, and then read [docs/writing-a-connector.md](docs/writing-a-connector.md).
 
 It is built to run on a Raspberry Pi Zero 2 W with 512MB of RAM, which means it will run comfortably
 on whatever you already have.

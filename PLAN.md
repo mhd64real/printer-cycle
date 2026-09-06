@@ -2016,7 +2016,25 @@ the AirPrint case exactly, so it has to be settled before Stage 64. Added as Sta
 ### Stage 63: Connector author guide
 - `docs/writing-a-connector.md`, built around the example.
 - **Done when:** it answers the questions the example raises rather than restating the spec.
-- **Status:** todo
+- **Status:** done, 2026-09-06. It opens by sending the reader to the example and says outright that
+  it is not a summary of the protocol document.
+- Structured as the questions somebody has *after* reading 95 lines that work: how do I get a token,
+  why is nothing happening, which scopes do I ask for, how do I know who is printing, how do I get
+  progress without polling, how do I test without a printer.
+- Most of it is what building printer-cycle actually cost. The enrol-then-reconnect dance, the
+  connector that is switched off, the token that has to be re-read, the format CUPS accepts and
+  silently fails to print: each of those was a bug here first, and each is now one paragraph that
+  somebody else does not have to spend a day on.
+
+**Two error shapes in the draft were wrong, and running them found it.** The scope denial does not
+say "scope denied" with a `scope` field; it names the method and puts `required_scope` in `data`. And
+the format refusal could not be reached at all the way the draft implied, because the printer is
+looked up first, so a bad printer id gives "no such printer" and the format is never checked. Both
+are now what core actually sends, copied from a real exchange rather than from memory.
+
+**The guide says out loud what is not finished.** An `identity: "none"` connector has no way to be
+given an owner, because nothing calls `connectors.setFallbackUser`. Writing "this is not built yet,
+here is the consequence" is better than a guide that quietly describes something that does not work.
 
 ### Stage 64: AirPrint connector, IPP server side
 - Its own IPP endpoint that accepts jobs from phones and forwards them to core.
@@ -2369,3 +2387,6 @@ Every change to this plan gets a line here, so the reasoning survives.
   from the specification and importing nothing from this repository. Printing with it surfaced Stage
   63b: a connector with no identity of its own has nowhere to get an owner, because the method for
   choosing one has never been wired into the interface.
+- **2026-09-06, after Stage 63:** the connector guide is built from what building this actually cost
+  rather than from the protocol document. Two error shapes in the draft were wrong and were corrected
+  by provoking them against a running core, which is the only way that kind of mistake gets caught.

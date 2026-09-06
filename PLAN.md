@@ -1853,7 +1853,31 @@ to be missing. Written down in docs/packages.md so the next person does not read
   failure, on CUPS 2.4.x. The install script should not treat it as an error, and the dashboard
   should not surface it to users.
 - **Done when:** a bare container ends with cupsd running and the driver set present.
-- **Status:** todo
+- **Status:** done, 2026-09-06. A bare Debian container ends with cupsd running and 18,143 drivers,
+  including both LaserJet 1018 candidates. Fedora ends with 13,969. Alpine ends with the 41 built
+  into CUPS, which is all there is there.
+
+**`printer-driver-all` installs nothing.** It is a metapackage with no `Depends` at all: every driver
+is a `Recommends`. With `--no-install-recommends`, which is what an installer should be using, the
+install finishes with a running cupsd, no error, and 43 drivers. That is the exact shape of failure
+this project exists to prevent, produced by the installer itself, and it would have shipped: every
+check said success.
+
+**Allowing recommends is the wrong fix.** It pulls 297 packages including the whole SANE scanning
+stack, which is both explicitly out of scope and the vendor-suite behaviour this is meant to replace.
+So the installer reads the driver names out of the metapackage and installs those with recommends
+still off: Debian's curation of which drivers, without Debian's opinion about what they drag along.
+165 packages, zero scanning packages. Read from the metapackage rather than written down, so a driver
+added to Debian arrives without anybody editing the installer.
+
+**Two PPD collections are named separately**, because `printer-driver-all` does not recommend them
+and they are most of the catalogue: 6,754 drivers without `foomatic-db-compressed-ppds` and
+`openprinting-ppds`, 18,143 with them.
+
+**The mDNS configuration is skipped on Alpine.** It ships an `/etc/nsswitch.conf` even though musl
+does not implement the name service switch, so editing it writes a line naming a glibc module that
+can never load. Inert rather than harmful, which is worse than either: a configuration file that
+looks configured and does nothing is how somebody spends an afternoon.
 
 ### Stage 59: Binaries, checksums, users, directories
 - Download and verify, create the system user, add it to `lpadmin`, create config and data
@@ -2220,3 +2244,7 @@ Every change to this plan gets a line here, so the reasoning survives.
   exist. Alpine turns out to package no printer drivers and no mDNS name resolution at all, so it is
   given printer-cycle with both limits stated at install time rather than a promise that does not
   hold there.
+- **2026-09-06, after Stage 58:** the installer nearly shipped a silent failure of its own. Debian's
+  driver metapackage carries every driver as a Recommends, so installing it the correct way installs
+  nothing and leaves a working cupsd with 43 drivers. Found by counting them rather than by trusting
+  the exit code.

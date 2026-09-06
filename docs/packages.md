@@ -66,6 +66,35 @@ printer and fails twenty seconds later with a name resolution error. A desktop
 install has it; a minimal server install, which a Raspberry Pi usually is, does
 not.
 
-**`printer-driver-all` on Debian** is a metapackage covering the split driver
-packages in one name, which is exactly what this project wants: every driver,
-without asking anybody to choose.
+**`printer-driver-all` on Debian is a trap.** It has no `Depends` at all: every
+driver in it is a `Recommends`. Installed with `--no-install-recommends`, which
+is what an installer should be using, it installs *nothing*, and the install
+finishes with a running cupsd, no error, and 43 drivers where there should be
+thousands.
+
+The obvious fix is to allow recommends, and it is wrong: that pulls 297 packages
+including the whole SANE scanning stack. printer-cycle does not scan, and
+dragging a scanner subsystem onto a Raspberry Pi in order to print is the
+vendor-suite behaviour this is supposed to be an alternative to.
+
+So the installer reads the driver names out of the metapackage and installs
+those with recommends still off. Debian's curation of *which drivers*, without
+Debian's opinion about what they should drag along. Measured at 165 packages and
+zero scanning packages.
+
+**Two PPD collections have to be named separately.** `printer-driver-all` does
+not recommend `foomatic-db-compressed-ppds` or `openprinting-ppds`, and they are
+most of the catalogue: with the metapackage's own list a fresh install offers
+6,754 drivers, and with those two it offers 18,143. They are the difference
+between "most printers" and "your printer".
+
+**Measured after install**, cupsd running in a bare container:
+
+| Distribution | Drivers offered |
+| ------------ | --------------- |
+| Debian 13    | 18,143          |
+| Fedora 41    | 13,969          |
+| Alpine 3.21  | 41              |
+
+Alpine's 41 are the ones built into CUPS itself. There is nothing else to
+install there.

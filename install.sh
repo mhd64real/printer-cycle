@@ -149,15 +149,22 @@ packages_core() {
 # printer-driver-hpcups is the part that prints.
 packages_drivers() {
 	case "$1" in
-	debian) echo "printer-driver-all printer-driver-cups-pdf cups-filters" ;;
-	rhel) echo "foomatic-db hplip-common gutenprint-cups cups-filters" ;;
-	arch) echo "gutenprint foomatic-db foomatic-db-engine foomatic-db-nonfree cups-filters" ;;
+	# printer-driver-all is expanded rather than installed: see expand_drivers.
+	#
+	# The two PPD collections are named separately because printer-driver-all
+	# does not recommend them, and they are most of the catalogue: with the
+	# metapackage's own list alone a fresh install offers 6,754 drivers, and
+	# with these it offers about eighteen thousand. They are the difference
+	# between "most printers" and "your printer".
+	debian) echo "printer-driver-all printer-driver-cups-pdf cups-filters foomatic-db-engine foomatic-db-compressed-ppds openprinting-ppds ghostscript" ;;
+	rhel) echo "foomatic-db foomatic-db-ppds hplip-common gutenprint-cups cups-filters ghostscript" ;;
+	arch) echo "gutenprint foomatic-db foomatic-db-engine foomatic-db-nonfree foomatic-db-ppds cups-filters ghostscript" ;;
 	# Alpine has no driver packages at all. Not in main, not in community: no
 	# foomatic-db, no gutenprint, no hplip, nothing. cups-filters is the whole
 	# of it. Checked against the repositories, twice, because it did not seem
 	# possible.
 	alpine) echo "cups-filters" ;;
-	suse) echo "OpenPrintingPPDs manufacturer-PPDs gutenprint cups-filters" ;;
+	suse) echo "OpenPrintingPPDs manufacturer-PPDs gutenprint cups-filters ghostscript" ;;
 	esac
 }
 
@@ -191,6 +198,175 @@ describe_limitation() {
 		echo "Alpine cannot resolve .local names, because that needs a glibc name service module and Alpine uses musl. Printers will still be discovered, but adding one may need its IP address rather than its name."
 		;;
 	esac
+}
+
+# ---------------------------------------------------------------------------
+# Installing
+# ---------------------------------------------------------------------------
+
+require_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		die "this has to run as root, because it installs packages and creates system directories. Try: sudo sh install.sh"
+	fi
+}
+
+# refresh_index updates the package list.
+#
+# Its own step because a stale index is the most common reason an install fails
+# on a machine that has been sitting in a cupboard, and the message it produces
+# otherwise is about a package not existing.
+refresh_index() {
+	case "$1" in
+	apt-get) DEBIAN_FRONTEND=noninteractive apt-get update -qq ;;
+	dnf | yum) "$1" -q makecache ;;
+	pacman) pacman -Sy --noconfirm >/dev/null ;;
+	apk) apk update -q ;;
+	zypper) zypper -q --non-interactive refresh ;;
+	esac
+}
+
+# expand_drivers turns Debian's driver metapackage into the packages it names.
+#
+# printer-driver-all is a metapackage with no Depends at all: every driver is a
+# Recommends. So installing it with --no-install-recommends installs nothing,
+# and the install finishes with a running cupsd, no error, and 43 drivers where
+# there should be thousands. That is the exact shape of failure this project
+# exists to prevent, produced by the installer itself.
+#
+# The obvious fix is to allow recommends, and it is wrong: doing that pulls in
+# 297 packages including the whole SANE scanning stack. printer-cycle does not
+# scan, and dragging a scanner subsystem onto a Raspberry Pi to print is the
+# vendor-suite behaviour this is meant to be an alternative to.
+#
+# So Debian's curated list of drivers is used, without Debian's opinion about
+# what those drivers should drag along: read the names out of the metapackage,
+# install those, recommends still off. Measured at 165 packages and zero
+# scanning packages.
+#
+# Read from the metapackage rather than written down here, so a driver added to
+# Debian arrives without anybody editing this file.
+expand_drivers() {
+	drivers=$(apt-cache show printer-driver-all 2>/dev/null |
+		sed -n 's/^Recommends: //p' | head -1 | tr -d ' ' | tr ',' ' ')
+	if [ -z "$drivers" ]; then
+		warn "could not read the driver list out of printer-driver-all, so only the drivers it depends on directly will be installed"
+		echo printer-driver-all
+		return 0
+	fi
+	echo "$drivers"
+}
+
+# install_packages installs a list, without asking anybody anything.
+#
+# Every one of these is the non-interactive form. An installer that stops on a
+# prompt nobody is there to answer has hung as far as its user is concerned.
+install_packages() {
+	manager=$1
+	shift
+	[ $# -gt 0 ] || return 0
+
+	say "installing: $*"
+	case "$manager" in
+	apt-get) DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@" ;;
+	dnf | yum) "$manager" install -y "$@" ;;
+	pacman) pacman -S --needed --noconfirm "$@" ;;
+	apk) apk add --no-cache "$@" ;;
+	zypper) zypper --non-interactive install --no-recommends "$@" ;;
+	esac
+}
+
+# configure_mdns puts mDNS into the name service switch.
+#
+# Installing libnss-mdns is not enough on its own: the package has to be named
+# in /etc/nsswitch.conf before anything resolves a .local address through it.
+# Debian's package does this itself; the others do not, and a machine where
+# discovery works and pairing then fails with a name resolution error is the
+# result. That symptom cost most of a stage to track down once.
+#
+# mdns4_minimal with [NOTFOUND=return] before dns is the standard ordering:
+# .local names are answered by mDNS, everything else falls through to DNS
+# without waiting for a multicast query to time out first.
+configure_mdns() {
+	family=$1
+
+	# Skipped where the module cannot exist.
+	#
+	# Alpine ships an /etc/nsswitch.conf and musl does not implement the name
+	# service switch at all, so editing it there writes a line naming a glibc
+	# module that can never load. It would be inert rather than harmful, which
+	# is worse than either: a configuration file that looks configured and does
+	# nothing is how somebody spends an afternoon.
+	case " $(limitations "$family") " in
+	*" no-mdns-names "*)
+		say "not configuring mDNS name resolution: this system has no module for it"
+		return 0
+		;;
+	esac
+
+	conf=/etc/nsswitch.conf
+	if [ ! -f "$conf" ]; then
+		warn "no $conf, so mDNS name resolution cannot be configured. Printers found by name may not be reachable by name."
+		return 0
+	fi
+	if grep -q 'mdns4_minimal' "$conf"; then
+		say "mDNS name resolution is already configured"
+		return 0
+	fi
+
+	# Rewritten through a temporary file and moved into place, so an
+	# interrupted install cannot leave a machine unable to resolve anything at
+	# all, which would be a considerably worse problem than a printer.
+	tmp="$conf.printer-cycle.$$"
+	sed 's/^hosts:.*/hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4/' "$conf" >"$tmp"
+
+	if ! grep -q 'mdns4_minimal' "$tmp"; then
+		rm -f "$tmp"
+		warn "could not find a hosts line in $conf to edit. Printers found by name may not be reachable by name."
+		return 0
+	fi
+	cat "$conf" >"$conf.printer-cycle.bak" 2>/dev/null || true
+	mv "$tmp" "$conf"
+	say "mDNS name resolution configured in $conf"
+}
+
+do_install() {
+	require_root
+
+	arch=$(detect_arch)
+	family=$(detect_family)
+	manager=$(detect_manager "$family")
+
+	command -v "$manager" >/dev/null 2>&1 ||
+		die "$manager is not on this machine, so packages cannot be installed"
+
+	say "installing printer-cycle for $family on $arch"
+
+	for limit in $(limitations "$family"); do
+		warn "$(describe_limitation "$limit")"
+	done
+
+	refresh_index "$manager"
+	install_packages "$manager" $(packages_core "$family")
+
+	if [ "$MINIMAL" = yes ]; then
+		say "skipping the driver set, as asked"
+	else
+		# Separate from the core packages on purpose. The driver set is large
+		# and the slow part of any install, and a failure here leaves a working
+		# printing system that can still drive a modern printer, which is worth
+		# distinguishing from a failure to install CUPS at all.
+		drivers=$(packages_drivers "$family")
+		if [ "$family" = debian ]; then
+			drivers=$(echo "$drivers" | sed "s/printer-driver-all/$(expand_drivers | tr '\n' ' ')/")
+		fi
+
+		install_packages "$manager" $drivers ||
+			warn "the driver set did not install completely. Printers needing no driver will still work."
+	fi
+
+	configure_mdns "$family"
+
+	say "done"
 }
 
 # ---------------------------------------------------------------------------
@@ -230,19 +406,36 @@ usage() {
 	cat >&2 <<EOF
 $VERSION_LINE
 
-  sh install.sh --detect    report what this machine is and what would be installed
+  sh install.sh              install the printing system and every driver
+  sh install.sh --minimal    install without the driver set
+  sh install.sh --detect     report what this machine is, and change nothing
 
 EOF
 }
 
+MINIMAL=no
+
 main() {
-	case "${1:---detect}" in
-	--detect) detect_report ;;
-	-h | --help) usage ;;
-	*)
-		usage
-		die "unknown option $1"
-		;;
+	action=install
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--detect) action=detect ;;
+		--minimal) MINIMAL=yes ;;
+		-h | --help)
+			usage
+			return 0
+			;;
+		*)
+			usage
+			die "unknown option $1"
+			;;
+		esac
+		shift
+	done
+
+	case "$action" in
+	detect) detect_report ;;
+	install) do_install ;;
 	esac
 }
 
